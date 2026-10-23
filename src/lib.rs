@@ -1238,6 +1238,58 @@ fn open_anime_detail(
     });
 }
 
+fn decode_manga_page(bytes: &[u8]) -> Option<PosterBuffer> {
+    let decoded = image::load_from_memory(bytes).ok()?.thumbnail(1200, 1800).to_rgba8();
+    Some(PosterBuffer::clone_from_slice(decoded.as_raw(), decoded.width(), decoded.height()))
+}
+
+fn load_manga_pages(weak: slint::Weak<MainWindow>, base: String, chapter_id: String, title: String) {
+    set_status(&weak, "Loading manga chapter pages…");
+    std::thread::spawn(move || {
+        let result = (|| -> Result<Vec<(String, PosterBuffer)>, String> {
+            let client = request_client()?;
+            let url = api_url(&base, &format!(
+                "meta/anilist-manga/read?chapterId={}&provider=mangahere",
+                urlencoding::encode(&chapter_id)
+            ));
+            let payload = fetch_json(&client, &url)?;
+            let items = result_array(&payload).ok_or_else(|| "No pages were returned for this chapter.".to_string())?;
+            let mut pages = Vec::new();
+            for (index, item) in items.iter().take(60).enumerate() {
+                let image = first_text(item, &["img", "image", "url", "src"]);
+                if !(image.starts_with("https://") || image.starts_with("http://")) { continue; }
+                let response = client.get(&image).timeout(Duration::from_secs(15)).send();
+                let Ok(response) = response.and_then(|response| response.error_for_status()) else { continue; };
+                let Ok(bytes) = response.bytes() else { continue; };
+                if let Some(pixels) = decode_manga_page(&bytes) {
+                    pages.push((format!("Page {}", index + 1), pixels));
+                }
+            }
+            if pages.is_empty() {
+                return Err("This chapter returned no readable pages. Try another chapter or provider.".to_string());
+            }
+            Ok(pages)
+        })();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                match result {
+                    Ok(pages) => {
+                        let count = pages.len();
+                        let pages = pages.into_iter().map(|(number, pixels)| MangaPageData {
+                            number: SharedString::from(number),
+                            page: Image::from_rgba8(pixels),
+                        }).collect::<Vec<_>>();
+                        window.set_manga_pages(ModelRc::new(VecModel::from(pages)));
+                        window.set_active_page(SharedString::from("reader"));
+                        window.set_status(SharedString::from(format!("Loaded {count} pages · scroll to read")));
+                    }
+                    Err(message) => window.set_status(SharedString::from(message)),
+                }
+            }
+        });
+    });
+}
+
 fn strip_markup(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut inside_tag = false;
