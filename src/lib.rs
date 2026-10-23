@@ -483,6 +483,17 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let client_id = client_id.clone();
         let platform_app = platform_app.clone();
         ui.on_profile_action(move |action| {
+            if action.as_str() == "logout" {
+                #[cfg(target_os = "android")]
+                if let Some(app) = platform_app.as_ref() {
+                    write_android_preference(app, "anilist_access_token", "");
+                }
+                if let Some(window) = weak.upgrade() {
+                    window.set_anilist_username(SharedString::from("Not connected"));
+                }
+                set_status(&weak, "AniList disconnected from this device.");
+                return;
+            }
             if action.as_str() == "login" {
                 let id = client_id.lock().map(|value| value.clone()).unwrap_or_default();
                 if id.trim().is_empty() {
@@ -514,10 +525,11 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                 set_status(&weak, "Connect AniList first to load your profile, lists, and statistics.");
                 return;
             };
-            set_status(&weak, "Loading your AniList profile and statistics…");
+            set_status(&weak, "Loading your AniList data…");
             let weak_for_profile = weak.clone();
+            let requested_action = action.to_string();
             std::thread::spawn(move || {
-                let result = fetch_anilist_profile(&token);
+                let result = fetch_anilist_section(&token, &requested_action);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(window) = weak_for_profile.upgrade() {
                         match result {
@@ -616,6 +628,55 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     );
 
     ui.run()
+}
+
+fn fetch_anilist_section(token: &str, action: &str) -> Result<(String, String), String> {
+    if action == "refresh" || action.is_empty() {
+        return fetch_anilist_profile(token);
+    }
+    let client = request_client()?;
+    let viewer_query = "query { Viewer { name unreadNotificationCount } }";
+    let viewer_response = client.post("https://graphql.anilist.co")
+        .bearer_auth(token)
+        .json(&serde_json::json!({"query": viewer_query}))
+        .send().map_err(|error| format!("AniList request failed: {error}"))?
+        .error_for_status().map_err(|error| format!("AniList authorization error: {error}"))?
+        .json::<Value>().map_err(|error| format!("AniList returned invalid data: {error}"))?;
+    let viewer = viewer_response.get("data").and_then(|data| data.get("Viewer"))
+        .ok_or_else(|| "AniList did not return a signed-in user.".to_string())?;
+    let name = first_text(viewer, &["name"]);
+    if action == "notifications" {
+        return Ok((name, format!("Unread AniList notifications: {}", first_text(viewer, &["unreadNotificationCount"]))));
+    }
+    if action == "list-anime" || action == "list-manga" {
+        let media_type = if action == "list-manga" { "MANGA" } else { "ANIME" };
+        let query = "query ($userName: String, $type: MediaType) { MediaListCollection(userName: $userName, type: $type) { lists { name entries { status progress score media { isAdult title { userPreferred } } } } } }";
+        let response = client.post("https://graphql.anilist.co")
+            .bearer_auth(token)
+            .json(&serde_json::json!({"query": query, "variables": {"userName": name, "type": media_type}}))
+            .send().map_err(|error| format!("AniList list request failed: {error}"))?
+            .error_for_status().map_err(|error| format!("AniList list request returned an error: {error}"))?
+            .json::<Value>().map_err(|error| format!("AniList returned invalid list data: {error}"))?;
+        let lists = response.pointer("/data/MediaListCollection/lists").and_then(Value::as_array)
+            .ok_or_else(|| "AniList did not return a media list.".to_string())?;
+        let mut summaries = Vec::new();
+        for list in lists {
+            let list_name = first_text(list, &["name"]);
+            let entries = list.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
+            for entry in entries {
+                let media = entry.get("media").unwrap_or(&Value::Null);
+                if media.get("isAdult").and_then(Value::as_bool) == Some(true) || has_restricted_adult_genre(media) { continue; }
+                let title = nested_title(media.get("title").unwrap_or(&Value::Null));
+                if !title.is_empty() {
+                    summaries.push(format!("{} · {} · progress {}", list_name, title, first_text(&entry, &["progress"])));
+                }
+                if summaries.len() >= 12 { break; }
+            }
+            if summaries.len() >= 12 { break; }
+        }
+        return Ok((name, if summaries.is_empty() { "No non-adult list entries were returned.".to_string() } else { summaries.join("\n") }));
+    }
+    Ok((name, "Choose a profile action to load account data.".to_string()))
 }
 
 fn fetch_anilist_profile(token: &str) -> Result<(String, String), String> {
