@@ -768,19 +768,22 @@ fn open_anime_detail(
         window.set_episodes(ModelRc::new(VecModel::from(Vec::<EpisodeRowData>::new())));
         window.set_active_page(SharedString::from("detail"));
     }
-    set_status(&weak, "Loading anime details and episodes…");
+    set_status(&weak, if media_type == "MANGA" {
+        "Loading manga information and chapters…"
+    } else {
+        "Loading anime details and episodes…"
+    });
 
     let base = api_base_for_selected(&api_base);
-
     std::thread::spawn(move || {
         let detail = (|| -> Result<(String, String, Vec<EpisodeRowData>), String> {
             let client = request_client()?;
-            let detail_url = api_url(
-                &base,
-                &format!(
-                    "{}",
-                ).replace("{}", if media_type == "MANGA" { "meta/anilist-manga/info/".to_string() + &urlencoding::encode(&id) + "?provider=mangahere" } else { "meta/anilist/data/".to_string() + &urlencoding::encode(&id) + "?provider=anikoto" }),
-            );
+            let detail_path = if media_type == "MANGA" {
+                format!("meta/anilist-manga/info/{}?provider=mangahere", urlencoding::encode(&id))
+            } else {
+                format!("meta/anilist/data/{}?provider=anikoto", urlencoding::encode(&id))
+            };
+            let detail_url = api_url(&base, &detail_path);
             let payload = fetch_json(&client, &detail_url)?;
             let data = payload.get("data").unwrap_or(&payload);
             let description = strip_markup(
@@ -788,31 +791,20 @@ fn open_anime_detail(
                     .and_then(Value::as_str)
                     .unwrap_or("Synopsis not available."),
             );
-            let status = first_text(data, &["status", "format", "type"]);
-            let episodes_url = api_url(
-                &base,
-                &format!(
-                    "meta/anilist/episodes/{}?provider=anikoto&dub=false",
-                    urlencoding::encode(&id)
-                ),
-            );
-            let payload = fetch_json(&client, &detail_url)?;
-            let data = payload.get("data").unwrap_or(&payload);
-            let description = strip_markup(
-                data.get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Synopsis not available."),
-            );
-            let status = first_text(data, &["status", "format", "type"]);
-            let episodes_url = api_url(
-                &base,
-                &format!(
-                    "meta/anilist/episodes/{}?provider=anikoto&dub=false",
-                    urlencoding::encode(&id)
-                ),
-            );
-            let episodes_payload = fetch_json(&client, &episodes_url).unwrap_or(Value::Null);
-            let episodes = parse_episode_rows(&episodes_payload);
+            let status = first_text(data, &["status", "format", "type", "chapters", "episodes"]);
+            let episodes = if media_type == "MANGA" {
+                parse_episode_rows(&payload)
+            } else {
+                let episodes_url = api_url(
+                    &base,
+                    &format!(
+                        "meta/anilist/episodes/{}?provider=anikoto&dub=false",
+                        urlencoding::encode(&id)
+                    ),
+                );
+                let episodes_payload = fetch_json(&client, &episodes_url).unwrap_or(Value::Null);
+                parse_episode_rows(&episodes_payload)
+            };
             Ok((description, status, episodes))
         })();
 
@@ -823,81 +815,31 @@ fn open_anime_detail(
                         let count = episodes.len();
                         window.set_selected_description(SharedString::from(description));
                         window.set_selected_meta(SharedString::from(if meta.is_empty() {
-                            "Anime".to_string()
+                            if media_type == "MANGA" { "Manga".to_string() } else { "Anime".to_string() }
                         } else {
                             meta
                         }));
                         window.set_episodes(ModelRc::new(VecModel::from(episodes)));
                         window.set_status(SharedString::from(if count == 0 {
-                            "No episodes came back from this provider. Try another title or API endpoint.".to_string()
+                            if media_type == "MANGA" {
+                                "No chapters were returned by this manga provider.".to_string()
+                            } else {
+                                "No episodes came back from this provider. Try another title or API endpoint.".to_string()
+                            }
+                        } else if media_type == "MANGA" {
+                            format!("{count} chapters available · tap one to read")
                         } else {
                             format!("{count} episodes available · tap one to play")
                         }));
                     }
                     Err(message) => {
-                        window.set_selected_description(SharedString::from(
-                            "Details are temporarily unavailable.",
-                        ));
+                        window.set_selected_description(SharedString::from("Details are temporarily unavailable."));
                         window.set_status(SharedString::from(message));
                     }
                 }
             }
         });
     });
-}
-
-fn load_manga_pages(weak: slint::Weak<MainWindow>, base: String, chapter_id: String, title: String) {
-    set_status(&weak, "Loading manga chapter pages…");
-    std::thread::spawn(move || {
-        let result = (|| -> Result<Vec<(String, PosterBuffer)>, String> {
-            let client = request_client()?;
-            let url = api_url(&base, &format!(
-                "meta/anilist-manga/read?chapterId={}&provider=mangahere",
-                urlencoding::encode(&chapter_id)
-            ));
-            let payload = fetch_json(&client, &url)?;
-            let items = result_array(&payload).ok_or_else(|| "No pages were returned for this chapter.".to_string())?;
-            let mut pages = Vec::new();
-            for (index, item) in items.iter().take(60).enumerate() {
-                let image = first_text(item, &["img", "image", "url", "src"]);
-                if !(image.starts_with("https://") || image.starts_with("http://")) { continue; }
-                let response = client.get(&image).timeout(Duration::from_secs(15)).send();
-                let Ok(response) = response.and_then(|response| response.error_for_status()) else { continue; };
-                let Ok(bytes) = response.bytes() else { continue; };
-                if let Some(pixels) = decode_poster(&bytes) {
-                    pages.push((format!("Page {}", first_text(item, &["page"]).if_empty(index + 1)), pixels));
-                }
-            }
-            if pages.is_empty() { return Err("This chapter returned no readable image pages. Try another chapter or provider.".to_string()); }
-            Ok(pages)
-        })();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(window) = weak.upgrade() {
-                match result {
-                    Ok(pages) => {
-                        let count = pages.len();
-                        let pages = pages.into_iter().map(|(number, pixels)| MangaPageData {
-                            number: SharedString::from(number),
-                            page: Image::from_rgba8(pixels),
-                        }).collect::<Vec<_>>();
-                        window.set_manga_pages(ModelRc::new(VecModel::from(pages)));
-                        window.set_active_page(SharedString::from("reader"));
-                        window.set_status(SharedString::from(format!("Loaded {count} pages · scroll to read")));
-                    }
-                    Err(message) => window.set_status(SharedString::from(message)),
-                }
-            }
-        });
-    });
-}
-
-trait EmptyFallback {
-    fn if_empty(self, fallback: usize) -> String;
-}
-impl EmptyFallback for String {
-    fn if_empty(self, fallback: usize) -> String {
-        if self.is_empty() { fallback.to_string() } else { self }
-    }
 }
 
 fn strip_markup(value: &str) -> String {
