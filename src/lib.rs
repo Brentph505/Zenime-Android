@@ -80,6 +80,18 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     #[cfg(not(target_os = "android"))]
     let initial_client_id = String::new();
     let client_id = Arc::new(Mutex::new(initial_client_id.clone()));
+    #[cfg(target_os = "android")]
+    let auto_play = platform_app.as_ref().and_then(|app| read_android_preference(app, "auto_play")).map(|value| value == "true").unwrap_or(true);
+    #[cfg(not(target_os = "android"))]
+    let auto_play = true;
+    #[cfg(target_os = "android")]
+    let auto_next = platform_app.as_ref().and_then(|app| read_android_preference(app, "auto_next")).map(|value| value == "true").unwrap_or(false);
+    #[cfg(not(target_os = "android"))]
+    let auto_next = false;
+    #[cfg(target_os = "android")]
+    let skip_intro = platform_app.as_ref().and_then(|app| read_android_preference(app, "skip_intro")).map(|value| value == "true").unwrap_or(false);
+    #[cfg(not(target_os = "android"))]
+    let skip_intro = false;
     let selected: SharedSelected = Arc::new(Mutex::new(SelectedAnime::default()));
     let selected_card: SharedCard = Arc::new(Mutex::new(None));
     let saved: SharedSaved = Arc::new(Mutex::new(Vec::new()));
@@ -95,6 +107,9 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
 
     ui.set_api_url(SharedString::from(initial_api));
     ui.set_anilist_client_id(SharedString::from(initial_client_id));
+    ui.set_auto_play(auto_play);
+    ui.set_auto_next(auto_next);
+    ui.set_skip_intro(skip_intro);
     ui.set_status(SharedString::from("Loading trending anime…"));
 
     {
@@ -491,6 +506,21 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                     }
                 });
             });
+        });
+    }
+
+    {
+        let weak = weak.clone();
+        let platform_app = platform_app.clone();
+        ui.on_playback_settings_changed(move |auto_play, auto_next, skip_intro| {
+            #[cfg(target_os = "android")]
+            if let Some(app) = platform_app.as_ref() {
+                write_android_preference(app, "auto_play", if auto_play { "true" } else { "false" });
+                write_android_preference(app, "auto_next", if auto_next { "true" } else { "false" });
+                write_android_preference(app, "skip_intro", if skip_intro { "true" } else { "false" });
+            }
+            let _ = (auto_play, auto_next, skip_intro);
+            set_status(&weak, "Playback preferences saved.");
         });
     }
 
