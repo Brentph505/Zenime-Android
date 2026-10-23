@@ -21,8 +21,10 @@ export struct MangaPageData {
 
 component AnimeTile inherits Rectangle {
     in property <AnimeCardData> anime;
+    in property <length> tile-width: 140px;
     callback chosen(string, string, string, image);
 
+    width: root.tile-width;
     height: 248px;
     background: #161b22;
     border-radius: 9px;
@@ -285,6 +287,7 @@ export component MainWindow inherits Window {
                     background: #171626;
                     border-radius: 12px;
                     clip: true;
+                    width: root.width - 28px;
                     Image {
                         source: @image-url("assets/zenime-discover-banner.webp");
                         width: parent.width;
@@ -384,8 +387,10 @@ export component MainWindow inherits Window {
                 }
 
                 GridLayout {
+                    width: root.width - 28px;
                     spacing: 11px;
                     for anime[index] in root.anime-cards: AnimeTile {
+                        tile-width: (root.width - 39px) / 2;
                         col: index.mod(2);
                         row: index / 2;
                         anime: anime;
@@ -457,8 +462,10 @@ export component MainWindow inherits Window {
                     wrap: word-wrap;
                 }
                 GridLayout {
+                    width: root.width - 28px;
                     spacing: 11px;
                     for anime[index] in root.anime-cards: AnimeTile {
+                        tile-width: (root.width - 39px) / 2;
                         col: index.mod(2);
                         row: index / 2;
                         anime: anime;
@@ -482,6 +489,7 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle {
+                    width: root.width - 28px;
                     height: 220px;
                     background: #161b22;
                     border-radius: 10px;
@@ -592,8 +600,10 @@ export component MainWindow inherits Window {
                     wrap: word-wrap;
                 }
                 GridLayout {
+                    width: root.width - 28px;
                     spacing: 11px;
                     for anime[index] in root.saved-cards: AnimeTile {
+                        tile-width: (root.width - 39px) / 2;
                         col: index.mod(2);
                         row: index / 2;
                         anime: anime;
@@ -619,7 +629,7 @@ export component MainWindow inherits Window {
                 for page in root.manga-pages: VerticalLayout {
                     spacing: 3px;
                     Text { text: page.number; color: #b7a7ff; font-size: 10px; horizontal-alignment: center; }
-                    Image { source: page.page; image-fit: contain; width: parent.width; height: 520px; }
+                    Image { source: page.page; image-fit: contain; width: root.width - 20px; height: 520px; }
                 }
             }
         }
@@ -645,8 +655,10 @@ export component MainWindow inherits Window {
                 }
                 Text { text: root.status; color: #9da7b3; font-size: 11px; wrap: word-wrap; }
                 GridLayout {
+                    width: root.width - 28px;
                     spacing: 11px;
                     for anime[index] in root.history-cards: AnimeTile {
+                        tile-width: (root.width - 39px) / 2;
                         col: index.mod(2); row: index / 2; anime: anime;
                         chosen(id, title, image-url, poster) => { root.anime-selected(id, title, image-url, poster); }
                     }
@@ -676,8 +688,10 @@ export component MainWindow inherits Window {
                 }
                 Text { text: root.status; color: #9da7b3; font-size: 11px; wrap: word-wrap; }
                 GridLayout {
+                    width: root.width - 28px;
                     spacing: 11px;
                     for anime[index] in root.anime-cards: AnimeTile {
+                        tile-width: (root.width - 39px) / 2;
                         col: index.mod(2); row: index / 2; anime: anime;
                         chosen(id, title, image-url, poster) => { root.anime-selected(id, title, image-url, poster); }
                     }
@@ -776,7 +790,7 @@ export component MainWindow inherits Window {
                     wrap: word-wrap;
                 }
                 LineEdit {
-                    width: parent.width;
+                    width: root.width - 32px;
                     height: 44px;
                     text <=> root.api-url;
                     placeholder-text: "Optional legacy API endpoint (https://...)";
@@ -826,7 +840,7 @@ export component MainWindow inherits Window {
                 }
                 Text { text: "AniList OAuth client ID"; color: #e6edf3; font-size: 13px; font-weight: 700; }
                 LineEdit {
-                    width: parent.width;
+                    width: root.width - 32px;
                     height: 44px;
                     text <=> root.anilist-client-id;
                     placeholder-text: "Client ID from your AniList developer settings";
