@@ -212,6 +212,8 @@ fn maybe_direct(client:&Client,url:&str,referer:&str)->Result<(String,String),St
                         if let Ok(text)=get_text(client,&resolved,url) {
                             if let Some(media)=direct_from_html(&text,&resolved){return Ok((media,referer.to_string()));}
                         }
+                        // Preserve the provider iframe as a fallback for the Android WebView player.
+                        return Ok((format!("zenime-embed://{}",urlencoding::encode(&resolved)),referer.to_string()));
                     }
                 }
             }
