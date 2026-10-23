@@ -342,8 +342,8 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let platform_app = platform_app.clone();
         ui.on_save_api_url(move |input| {
             let base = normalize_base(input.as_str());
-            if !base.starts_with("https://") && !base.starts_with("http://") {
-                set_status(&weak, "The API URL must start with https:// or http://.");
+            if !base.is_empty() && !base.starts_with("https://") && !base.starts_with("http://") {
+                set_status(&weak, "Leave the optional endpoint blank or enter an https:// URL.");
                 return;
             }
             if let Ok(mut state) = api_base.lock() {
