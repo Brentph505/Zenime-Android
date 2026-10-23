@@ -234,7 +234,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             let anime_title = chosen.title.clone();
             let media_type = chosen.media_type.clone();
             let queued = episode_queue.lock().map(|items| items.clone()).unwrap_or_default();
-            let next_episode = queued.iter().position(|episode| episode.id == episode_id)
+            let next_episode = queued.iter().position(|episode| episode.id.to_string() == episode_id)
                 .and_then(|index| queued.get(index + 1).cloned());
             #[cfg(target_os = "android")]
             let auto_next = platform_app.as_ref().and_then(|app| read_android_preference(app, "auto_next")).map(|value| value == "true").unwrap_or(false);
@@ -840,6 +840,24 @@ fn advanced_search_route(query: &str, media_type: &str, filters: &SearchFilters)
     route
 }
 
+fn fetch_anilist_media_detail(client: &Client, id: &str, media_type: &str) -> Result<Value, String> {
+    let numeric_id = id.parse::<i64>().map_err(|_| "Invalid AniList media ID.".to_string())?;
+    let query = "query ($id: Int, $type: MediaType) { Media(id: $id, type: $type, isAdult: false) { id idMal title { userPreferred english romaji native } coverImage { extraLarge large medium } description format status episodes chapters averageScore popularity genres seasonYear isAdult } }";
+    let response = client.post("https://graphql.anilist.co")
+        .json(&serde_json::json!({"query": query, "variables": {"id": numeric_id, "type": media_type}}))
+        .send()
+        .map_err(|error| format!("AniList detail request failed: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("AniList detail returned an error: {error}"))?
+        .json::<Value>()
+        .map_err(|error| format!("AniList returned invalid detail data: {error}"))?;
+    if let Some(errors) = response.get("errors").and_then(Value::as_array) {
+        let message = errors.first().and_then(|item| item.get("message")).and_then(Value::as_str).unwrap_or("AniList detail query failed.");
+        return Err(message.to_string());
+    }
+    Ok(response)
+}
+
 fn fetch_anilist_catalog(query_text: &str, category: &str, filters: &SearchFilters) -> Result<Value, String> {
     let client = request_client()?;
     let media_type = if category == "manga" { "MANGA" } else { "ANIME" };
@@ -948,6 +966,7 @@ type PosterBuffer = slint::SharedPixelBuffer<slint::Rgba8Pixel>;
 
 fn decode_poster(bytes: &[u8]) -> Option<PosterBuffer> {
     let decoded = image::load_from_memory(bytes).ok()?.thumbnail(260, 360).to_rgba8();
+
     Some(PosterBuffer::clone_from_slice(
         decoded.as_raw(),
         decoded.width(),
@@ -1135,7 +1154,10 @@ fn open_anime_detail(
                 format!("meta/anilist/data/{}?provider=anikoto", urlencoding::encode(&id))
             };
             let detail_url = api_url(&base, &detail_path);
-            let payload = fetch_json(&client, &detail_url)?;
+            let payload = match fetch_json(&client, &detail_url) {
+                Ok(payload) => payload,
+                Err(_) => fetch_anilist_media_detail(&client, &id, if media_type == "MANGA" { "MANGA" } else { "ANIME" })?,
+            };
             let data = payload.get("data").unwrap_or(&payload);
             let description = strip_markup(
                 data.get("description")
