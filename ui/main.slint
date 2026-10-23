@@ -21,7 +21,7 @@ export struct MangaPageData {
 
 component AnimeTile inherits Rectangle {
     in property <AnimeCardData> anime;
-    callback chosen(string, string, image);
+    callback chosen(string, string, string, image);
 
     height: 248px;
     background: #161b22;
@@ -60,7 +60,7 @@ component AnimeTile inherits Rectangle {
     }
 
     TouchArea {
-        clicked => { root.chosen(root.anime.id, root.anime.title, root.anime.poster); }
+        clicked => { root.chosen(root.anime.id, root.anime.title, root.anime.image-url, root.anime.poster); }
     }
 }
 
@@ -147,7 +147,7 @@ export component MainWindow inherits Window {
 
     callback category-selected(string);
     callback search-requested(string);
-    callback anime-selected(string, string, image);
+    callback anime-selected(string, string, string, image);
     callback episode-selected(string);
     callback navigate(string);
     callback save-selected();
@@ -318,7 +318,7 @@ export component MainWindow inherits Window {
                         col: index.mod(2);
                         row: index / 2;
                         anime: anime;
-                        chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
+                        chosen(id, title, image-url, poster) => { root.anime-selected(id, title, image-url, poster); }
                     }
                 }
             }
