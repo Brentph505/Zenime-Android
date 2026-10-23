@@ -746,16 +746,42 @@ fn image_url(value: &Value) -> String {
     String::new()
 }
 
-fn fetch_anilist_catalog(query_text: &str, category: &str) -> Result<Value, String> {
+fn advanced_search_route(query: &str, media_type: &str, filters: &SearchFilters) -> String {
+    let mut route = format!(
+        "meta/anilist/advanced-search?query={}&type={}&page=1&perPage=24&isAdult=false",
+        urlencoding::encode(query),
+        media_type
+    );
+    for (key, value) in [
+        ("year", filters.year.trim()),
+        ("season", filters.season.trim()),
+        ("format", filters.format.trim()),
+        ("status", filters.status.trim()),
+    ] {
+        if !value.is_empty() {
+            route.push_str("&");
+            route.push_str(key);
+            route.push_str("=");
+            route.push_str(&urlencoding::encode(value));
+        }
+    }
+    let sort = if filters.sort.trim().is_empty() { "POPULARITY_DESC" } else { filters.sort.trim() };
+    let encoded_sort = urlencoding::encode(&format!("[\"{}\"]", sort));
+    route.push_str("&sort=");
+    route.push_str(encoded_sort.as_ref());
+    route
+}
+
+fn fetch_anilist_catalog(query_text: &str, category: &str, filters: &SearchFilters) -> Result<Value, String> {
     let client = request_client()?;
     let media_type = if category == "manga" { "MANGA" } else { "ANIME" };
-    let sort = match category {
+    let sort = if !filters.sort.trim().is_empty() { filters.sort.trim() } else { match category {
         "popular" => "POPULARITY_DESC",
         "top-rated" => "SCORE_DESC",
         "latest" => "TRENDING_DESC",
         _ => "TRENDING_DESC",
-    };
-    let query = "query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $sort: [MediaSort]) { Page(page: $page, perPage: $perPage) { pageInfo { hasNextPage } media(type: $type, search: $search, sort: $sort, isAdult: false) { id title { userPreferred english romaji native } coverImage { extraLarge large medium } description format status episodes chapters averageScore popularity genres seasonYear isAdult } } }";
+    }};
+    let query = "query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $sort: [MediaSort], $season: MediaSeason, $year: Int, $format: MediaFormat, $status: MediaStatus) { Page(page: $page, perPage: $perPage) { pageInfo { hasNextPage } media(type: $type, search: $search, sort: $sort, season: $season, seasonYear: $year, format: $format, status: $status, isAdult: false) { id title { userPreferred english romaji native } coverImage { extraLarge large medium } description format status episodes chapters averageScore popularity genres seasonYear isAdult } } }";
     let response = client.post("https://graphql.anilist.co")
         .json(&serde_json::json!({
             "query": query,
@@ -764,7 +790,11 @@ fn fetch_anilist_catalog(query_text: &str, category: &str) -> Result<Value, Stri
                 "perPage": 24,
                 "search": if query_text.trim().is_empty() { Value::Null } else { Value::String(query_text.to_string()) },
                 "type": media_type,
-                "sort": [sort]
+                "sort": [sort],
+                "season": if filters.season.is_empty() { Value::Null } else { Value::String(filters.season.clone()) },
+                "year": filters.year.parse::<i32>().ok().map_or(Value::Null, |year| serde_json::json!(year)),
+                "format": if filters.format.is_empty() { Value::Null } else { Value::String(filters.format.clone()) },
+                "status": if filters.status.is_empty() { Value::Null } else { Value::String(filters.status.clone()) }
             }
         }))
         .send()
@@ -907,20 +937,14 @@ fn load_catalog_with_filters(
                 "top-rated" => "meta/anilist/advanced-search?type=ANIME&sort=%5B%22SCORE_DESC%22%5D&page=1&perPage=24".to_string(),
                 "top-airing" => "meta/anilist/advanced-search?type=ANIME&status=RELEASING&sort=%5B%22POPULARITY_DESC%22%5D&page=1&perPage=24".to_string(),
                 "latest" => "meta/anilist/recent-episodes?page=1&perPage=24&provider=anikoto".to_string(),
-                "search" => format!(
-                    "meta/anilist/advanced-search?query={}&type=ANIME&page=1&perPage=24",
-                    urlencoding::encode(&query)
-                ),
-                "manga" => format!(
-                    "meta/anilist/advanced-search?query={}&type=MANGA&page=1&perPage=24",
-                    urlencoding::encode(&query)
-                ),
+                "search" => advanced_search_route(&query, "ANIME", &filters),
+                "manga" => advanced_search_route(&query, "MANGA", &filters),
                 _ => "meta/anilist/trending?page=1&perPage=24".to_string(),
             };
             let url = api_url(&base, &route);
             let payload = match fetch_json(&client, &url) {
                 Ok(payload) => payload,
-                Err(_) => fetch_anilist_catalog(&query, &category)?,
+                Err(_) => fetch_anilist_catalog(&query, &category, &filters)?,
             };
             let records = parse_anime_records(&payload, category == "latest");
             if records.is_empty() {
