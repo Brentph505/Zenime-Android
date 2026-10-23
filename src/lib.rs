@@ -26,6 +26,7 @@ struct AnimeRecord {
 struct SelectedAnime {
     id: String,
     title: String,
+    media_type: String,
 }
 
 type SharedApiBase = Arc<Mutex<String>>;
@@ -127,7 +128,10 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let api_base = api_base.clone();
         let selected = selected.clone();
         let selected_card = selected_card.clone();
+        let category_state = current_category.clone();
         ui.on_anime_selected(move |id, title, poster| {
+            let category = category_state.lock().map(|value| value.clone()).unwrap_or_else(|_| "trending".to_string());
+            let media_type = if category == "manga" { "MANGA" } else { "ANIME" };
             open_anime_detail(
                 weak.clone(),
                 api_base.clone(),
@@ -135,6 +139,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                 selected_card.clone(),
                 id.to_string(),
                 title.to_string(),
+                media_type.to_string(),
                 poster,
             );
         });
@@ -158,6 +163,11 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             let platform_app = platform_app.clone();
             let episode_id = episode_id.to_string();
             let anime_title = chosen.title.clone();
+            let media_type = chosen.media_type.clone();
+            if media_type == "MANGA" {
+                load_manga_pages(weak.clone(), base, episode_id, anime_title);
+                return;
+            }
 
             std::thread::spawn(move || {
                 match find_direct_stream(&base, &episode_id) {
@@ -471,6 +481,10 @@ fn result_array(payload: &Value) -> Option<&Vec<Value>> {
     data.as_array()
         .or_else(|| data.get("results").and_then(Value::as_array))
         .or_else(|| data.get("episodes").and_then(Value::as_array))
+        .or_else(|| data.get("chapters").and_then(Value::as_array))
+        .or_else(|| data.get("pages").and_then(Value::as_array))
+        .or_else(|| payload.get("chapters").and_then(Value::as_array))
+        .or_else(|| payload.get("pages").and_then(Value::as_array))
 }
 
 fn value_text(value: &Value) -> String {
@@ -726,18 +740,20 @@ fn open_anime_detail(
     selected_card: SharedCard,
     id: String,
     title: String,
+    media_type: String,
     poster: Image,
 ) {
     let card = AnimeCardData {
         id: SharedString::from(id.clone()),
         title: SharedString::from(title.clone()),
-        details: SharedString::from("Anime"),
+        details: SharedString::from(if media_type == "MANGA" { "Manga" } else { "Anime" }),
         poster: poster.clone(),
     };
 
     if let Ok(mut current) = selected.lock() {
         current.id = id.clone();
         current.title = title.clone();
+        current.media_type = media_type.clone();
     }
     if let Ok(mut current) = selected_card.lock() {
         *current = Some(card);
@@ -762,7 +778,21 @@ fn open_anime_detail(
             let detail_url = api_url(
                 &base,
                 &format!(
-                    "meta/anilist/data/{}?provider=anikoto",
+                    "{}",
+                ).replace("{}", if media_type == "MANGA" { "meta/anilist-manga/info/".to_string() + &urlencoding::encode(&id) + "?provider=mangahere" } else { "meta/anilist/data/".to_string() + &urlencoding::encode(&id) + "?provider=anikoto" }),
+            );
+            let payload = fetch_json(&client, &detail_url)?;
+            let data = payload.get("data").unwrap_or(&payload);
+            let description = strip_markup(
+                data.get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Synopsis not available."),
+            );
+            let status = first_text(data, &["status", "format", "type"]);
+            let episodes_url = api_url(
+                &base,
+                &format!(
+                    "meta/anilist/episodes/{}?provider=anikoto&dub=false",
                     urlencoding::encode(&id)
                 ),
             );
@@ -816,6 +846,60 @@ fn open_anime_detail(
     });
 }
 
+fn load_manga_pages(weak: slint::Weak<MainWindow>, base: String, chapter_id: String, title: String) {
+    set_status(&weak, "Loading manga chapter pages…");
+    std::thread::spawn(move || {
+        let result = (|| -> Result<Vec<(String, PosterBuffer)>, String> {
+            let client = request_client()?;
+            let url = api_url(&base, &format!(
+                "meta/anilist-manga/read?chapterId={}&provider=mangahere",
+                urlencoding::encode(&chapter_id)
+            ));
+            let payload = fetch_json(&client, &url)?;
+            let items = result_array(&payload).ok_or_else(|| "No pages were returned for this chapter.".to_string())?;
+            let mut pages = Vec::new();
+            for (index, item) in items.iter().take(60).enumerate() {
+                let image = first_text(item, &["img", "image", "url", "src"]);
+                if !(image.starts_with("https://") || image.starts_with("http://")) { continue; }
+                let response = client.get(&image).timeout(Duration::from_secs(15)).send();
+                let Ok(response) = response.and_then(|response| response.error_for_status()) else { continue; };
+                let Ok(bytes) = response.bytes() else { continue; };
+                if let Some(pixels) = decode_poster(&bytes) {
+                    pages.push((format!("Page {}", first_text(item, &["page"]).if_empty(index + 1)), pixels));
+                }
+            }
+            if pages.is_empty() { return Err("This chapter returned no readable image pages. Try another chapter or provider.".to_string()); }
+            Ok(pages)
+        })();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                match result {
+                    Ok(pages) => {
+                        let count = pages.len();
+                        let pages = pages.into_iter().map(|(number, pixels)| MangaPageData {
+                            number: SharedString::from(number),
+                            page: Image::from_rgba8(pixels),
+                        }).collect::<Vec<_>>();
+                        window.set_manga_pages(ModelRc::new(VecModel::from(pages)));
+                        window.set_active_page(SharedString::from("reader"));
+                        window.set_status(SharedString::from(format!("Loaded {count} pages · scroll to read")));
+                    }
+                    Err(message) => window.set_status(SharedString::from(message)),
+                }
+            }
+        });
+    });
+}
+
+trait EmptyFallback {
+    fn if_empty(self, fallback: usize) -> String;
+}
+impl EmptyFallback for String {
+    fn if_empty(self, fallback: usize) -> String {
+        if self.is_empty() { fallback.to_string() } else { self }
+    }
+}
+
 fn strip_markup(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut inside_tag = false;
@@ -861,7 +945,7 @@ fn parse_episode_rows(payload: &Value) -> Vec<EpisodeRowData> {
             Some(EpisodeRowData {
                 id: SharedString::from(id),
                 title: SharedString::from(label),
-                details: SharedString::from("Sub · tap to play"),
+                details: SharedString::from("Select to open"),
             })
         })
         .collect()
