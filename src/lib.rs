@@ -876,11 +876,9 @@ fn request_client() -> Result<Client, String> {
 }
 
 fn fetch_json(client: &Client, url: &str) -> Result<Value, String> {
-    let mut request = client.get(url);
-    if let Some(key) = option_env!("ZENIME_API_KEY").filter(|key| !key.trim().is_empty()) {
-        request = request.header("X-API-Key", key);
-    }
-    let response = request.send().map_err(|error| {
+    // Never compile a shared API key into the Android client. APK contents can
+    // be inspected, so credentials must stay inside the Vercel server-side API.
+    let response = client.get(url).send().map_err(|error| {
         format!("Network request failed. Check the API endpoint and connection. ({error})")
     })?;
     let response = response.error_for_status().map_err(|error| {
