@@ -217,7 +217,7 @@ fn maybe_direct(client:&Client,url:&str,referer:&str)->Result<(String,String),St
             }
         }
     }
-    Err("The provider returned an embed page but no direct HLS/MP4 stream. This native player cannot play arbitrary embed pages.".into())
+    Err(format!("EMBED_URL:{url}"))
 }
 
 fn episodes_reanime(client:&Client,title:&str)->Result<Vec<ProviderRow>,String>{

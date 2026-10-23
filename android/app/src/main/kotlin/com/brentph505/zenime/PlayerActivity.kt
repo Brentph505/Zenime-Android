@@ -44,6 +44,11 @@ class PlayerActivity : Activity() {
             return
         }
 
+        val useLocalProxy = LocalHlsProxy.start()
+        val playbackUrl = if (useLocalProxy && mediaUrl.substringBefore('?').lowercase().endsWith(".m3u8")) {
+            LocalHlsProxy.proxyUrl(mediaUrl, referer)
+        } else mediaUrl
+
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
@@ -122,7 +127,7 @@ class PlayerActivity : Activity() {
 
         setContentView(root)
 
-        val itemBuilder = MediaItem.Builder().setUri(Uri.parse(mediaUrl))
+        val itemBuilder = MediaItem.Builder().setUri(Uri.parse(playbackUrl))
         val lower = mediaUrl.substringBefore('?').lowercase()
         if (lower.endsWith(".m3u8")) {
             itemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
@@ -170,6 +175,7 @@ class PlayerActivity : Activity() {
         super.onStop()
         player?.release()
         player = null
+        LocalHlsProxy.stop()
         playerView?.player = null
         playerView = null
     }

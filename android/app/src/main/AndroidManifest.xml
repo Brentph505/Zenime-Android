@@ -6,7 +6,7 @@
         android:allowBackup="false"
         android:label="Zenime"
         android:theme="@android:style/Theme.Material.NoActionBar"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
@@ -29,6 +29,13 @@
                 <data android:scheme="zenime" android:host="callback" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".IframePlayerActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:label="Zenime Embedded Player"
+            android:screenOrientation="unspecified" />
 
         <activity
             android:name=".PlayerActivity"

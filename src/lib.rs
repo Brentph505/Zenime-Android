@@ -1530,6 +1530,13 @@ fn find_direct_stream(base: &str, episode_id: &str, dub: bool, anime_title: &str
     let native_error = if episode_id.starts_with("zn:") {
         match providers::resolve_episode(&client, episode_id, anime_title, dub) {
             Ok(result) => return Ok(result),
+            Err(error) if error.starts_with("EMBED_URL:") => {
+                let embed = error.trim_start_matches("EMBED_URL:");
+                if embed.starts_with("https://") || embed.starts_with("http://") {
+                    return Ok((format!("zenime-embed://{}", urlencoding::encode(embed)), provider_referer("anikoto").to_string()));
+                }
+                error
+            }
             Err(error) => error,
         }
     } else {
