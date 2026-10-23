@@ -35,6 +35,15 @@ type SharedCard = Arc<Mutex<Option<AnimeCardData>>>;
 type SharedSaved = Arc<Mutex<Vec<AnimeCardData>>>;
 type SharedHistory = Arc<Mutex<Vec<AnimeCardData>>>;
 
+#[derive(Clone, Default)]
+struct SearchFilters {
+    year: String,
+    season: String,
+    format: String,
+    status: String,
+    sort: String,
+}
+
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: PlatformApp) {
