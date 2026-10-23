@@ -300,7 +300,7 @@ internal object LocalHlsProxy {
 
     private object MatcherQuote {
         fun quote(value: String): String {
-            return value.replace("\\", "\\\\").replace("$", "\\$").replace("\"", "\\"")
+            return value.replace("\\", "\\\\").replace("$", "\\$").replace("\"", "\\\"")
         }
     }
 }
