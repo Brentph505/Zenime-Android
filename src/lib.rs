@@ -56,7 +56,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     let weak = ui.as_weak();
 
     #[cfg(target_os = "android")]
-    let saved_api = platform_app.as_ref().and_then(read_android_preference);
+    let saved_api = platform_app.as_ref().and_then(|app| read_android_preference(app, "api_base"));
     #[cfg(not(target_os = "android"))]
     let saved_api: Option<String> = None;
 
@@ -959,7 +959,7 @@ fn provider_referer(provider: &str) -> &'static str {
 }
 
 #[cfg(target_os = "android")]
-fn read_android_preference(app: &PlatformApp) -> Option<String> {
+fn read_android_preference(app: &PlatformApp, key: &str) -> Option<String> {
     let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
     let vm = unsafe { jni::JavaVM::from_raw(vm_ptr) }.ok()?;
     vm.attach_current_thread(|mut env| -> jni::errors::Result<Option<String>> {
@@ -972,8 +972,8 @@ fn read_android_preference(app: &PlatformApp) -> Option<String> {
             "(Ljava/lang/String;I)Landroid/content/SharedPreferences;",
             &[jni::objects::JValue::Object(&name_obj), jni::objects::JValue::Int(0)],
         )?.l()?;
-        let key = env.new_string("api_base")?;
-        let key_obj: jni::objects::JObject = key.into();
+        let key_string = env.new_string(key)?;
+        let key_obj: jni::objects::JObject = key_string.into();
         let default = env.new_string("")?;
         let default_obj: jni::objects::JObject = default.into();
         let value = env.call_method(
