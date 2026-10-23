@@ -140,6 +140,9 @@ export component MainWindow inherits Window {
     in-out property <string> search-sort: "POPULARITY_DESC";
     in-out property <string> anilist-username: "Not connected";
     in-out property <string> anilist-client-id: "";
+    in-out property <bool> auto-play: true;
+    in-out property <bool> auto-next: false;
+    in-out property <bool> skip-intro: false;
     in-out property <string> active-page: "home";
     in-out property <string> active-category: "trending";
     in-out property <string> status: "Starting Zenime…";
@@ -164,6 +167,7 @@ export component MainWindow inherits Window {
     callback manga-action(string);
     callback profile-action(string);
     callback save-anilist-client-id(string);
+    callback playback-settings-changed(bool, bool, bool);
     callback open-link(string);
 
     VerticalLayout {
@@ -682,6 +686,34 @@ export component MainWindow inherits Window {
                     TouchArea { clicked => { root.save-api-url(root.api-url); } }
                 }
                 Rectangle { height: 1px; background: #30363d; }
+                Text { text: "Playback"; color: #e6edf3; font-size: 16px; font-weight: 800; }
+                Rectangle {
+                    height: 42px; background: #161b22; border-radius: 8px;
+                    HorizontalLayout {
+                        padding-left: 12px; padding-right: 12px; spacing: 8px; alignment: center;
+                        Text { text: "Autoplay episodes"; color: #e6edf3; font-size: 12px; horizontal-stretch: 1; }
+                        Text { text: root.auto-play ? "ON" : "OFF"; color: root.auto-play ? #b7a7ff : #8b949e; font-size: 11px; font-weight: 800; }
+                    }
+                    TouchArea { clicked => { root.auto-play = !root.auto-play; root.playback-settings-changed(root.auto-play, root.auto-next, root.skip-intro); } }
+                }
+                Rectangle {
+                    height: 42px; background: #161b22; border-radius: 8px;
+                    HorizontalLayout {
+                        padding-left: 12px; padding-right: 12px; spacing: 8px; alignment: center;
+                        Text { text: "Auto-next episode"; color: #e6edf3; font-size: 12px; horizontal-stretch: 1; }
+                        Text { text: root.auto-next ? "ON" : "OFF"; color: root.auto-next ? #b7a7ff : #8b949e; font-size: 11px; font-weight: 800; }
+                    }
+                    TouchArea { clicked => { root.auto-next = !root.auto-next; root.playback-settings-changed(root.auto-play, root.auto-next, root.skip-intro); } }
+                }
+                Rectangle {
+                    height: 42px; background: #161b22; border-radius: 8px;
+                    HorizontalLayout {
+                        padding-left: 12px; padding-right: 12px; spacing: 8px; alignment: center;
+                        Text { text: "Show skip-intro control"; color: #e6edf3; font-size: 12px; horizontal-stretch: 1; }
+                        Text { text: root.skip-intro ? "ON" : "OFF"; color: root.skip-intro ? #b7a7ff : #8b949e; font-size: 11px; font-weight: 800; }
+                    }
+                    TouchArea { clicked => { root.skip-intro = !root.skip-intro; root.playback-settings-changed(root.auto-play, root.auto-next, root.skip-intro); } }
+                }
                 Text { text: "AniList OAuth client ID"; color: #e6edf3; font-size: 13px; font-weight: 700; }
                 LineEdit {
                     width: parent.width;
