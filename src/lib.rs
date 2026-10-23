@@ -33,6 +33,7 @@ type SharedApiBase = Arc<Mutex<String>>;
 type SharedSelected = Arc<Mutex<SelectedAnime>>;
 type SharedCard = Arc<Mutex<Option<AnimeCardData>>>;
 type SharedSaved = Arc<Mutex<Vec<AnimeCardData>>>;
+type SharedHistory = Arc<Mutex<Vec<AnimeCardData>>>;
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
@@ -68,6 +69,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     let selected: SharedSelected = Arc::new(Mutex::new(SelectedAnime::default()));
     let selected_card: SharedCard = Arc::new(Mutex::new(None));
     let saved: SharedSaved = Arc::new(Mutex::new(Vec::new()));
+    let history: SharedHistory = Arc::new(Mutex::new(Vec::new()));
     let current_category = Arc::new(Mutex::new("trending".to_string()));
     let current_query = Arc::new(Mutex::new(String::new()));
 
@@ -296,7 +298,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                     set_status(&weak, "Set a compatible metadata API, then save and refresh.");
                 }
                 "history" => {
-                    let copy = saved.lock().map(|items| items.clone()).unwrap_or_default();
+                    let copy = history.lock().map(|items| items.clone()).unwrap_or_default();
                     if let Some(window) = weak.upgrade() {
                         window.set_history_cards(ModelRc::new(VecModel::from(copy.clone())));
                     }
@@ -324,18 +326,21 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
 
     {
         let weak = weak.clone();
-        let saved = saved.clone();
+        let history = history.clone();
+        let platform_app = platform_app.clone();
         ui.on_history_action(move |action| {
             match action.as_str() {
                 "clear" => {
-                    if let Ok(mut items) = saved.lock() { items.clear(); }
+                    if let Ok(mut items) = history.lock() { items.clear(); }
+                    #[cfg(target_os = "android")]
+                    if let Some(app) = platform_app.as_ref() { write_android_preference(app, "history_items", "[]"); }
                     if let Some(window) = weak.upgrade() {
                         window.set_history_cards(ModelRc::new(VecModel::from(Vec::<AnimeCardData>::new())));
                     }
                     set_status(&weak, "Local history cleared.");
                 }
                 _ => {
-                    let items = saved.lock().map(|items| items.clone()).unwrap_or_default();
+                    let items = history.lock().map(|items| items.clone()).unwrap_or_default();
                     if let Some(window) = weak.upgrade() {
                         window.set_history_cards(ModelRc::new(VecModel::from(items.clone())));
                     }
