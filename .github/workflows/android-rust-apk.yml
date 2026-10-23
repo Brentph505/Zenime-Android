@@ -45,7 +45,7 @@ jobs:
           packages: 'platform-tools'
 
       - name: Install Android SDK, NDK, and CMake
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+        run: sdkmanager "platforms;android-27" "platforms;android-35" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -59,11 +59,17 @@ jobs:
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+          ANDROID_JAR: /usr/local/lib/android/sdk/platforms/android-36/android.jar
+          ANDROID_PLATFORM: android-36
           ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.2.12479018
           ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/27.2.12479018
         run: |
-          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+          test -f "$ANDROID_JAR"
+          test -f "$ANDROID_HOME/platforms/android-27/android.jar"
           test -d "$ANDROID_NDK_HOME"
+          echo "Android SDK platforms:"
+          find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' | sort
+          echo "Using android.jar: $ANDROID_JAR"
           cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build --release --lib
 
       - name: Set up Gradle
