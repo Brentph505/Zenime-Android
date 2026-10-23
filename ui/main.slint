@@ -121,6 +121,56 @@ component EpisodeTile inherits Rectangle {
     }
 }
 
+component CategoryChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback chosen();
+
+    background: active ? #403568 : #161b22;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: active ? #8b79d9 : #30363d;
+    height: 31px;
+    horizontal-stretch: 1;
+    Text {
+        text: root.label;
+        color: root.active ? #ffffff : #aeb8c4;
+        font-size: 10px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea { clicked => { root.chosen(); } }
+}
+
+component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> glyph;
+    in property <bool> active: false;
+    callback chosen();
+
+    horizontal-stretch: 1;
+    background: active ? #171626 : #0d1117;
+    VerticalLayout {
+        spacing: 2px;
+        alignment: center;
+        Text {
+            text: root.glyph;
+            color: root.active ? #ffffff : #b7a7ff;
+            font-size: 20px;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.label;
+            color: root.active ? #d7ceff : #8b949e;
+            font-size: 9px;
+            font-weight: 800;
+            horizontal-alignment: center;
+        }
+    }
+    TouchArea { clicked => { root.chosen(); } }
+}
+
 export component MainWindow inherits Window {
     title: "Zenime";
     width: 400px;
@@ -846,54 +896,4 @@ export component MainWindow inherits Window {
             }
         }
     }
-}
-
-component CategoryChip inherits Rectangle {
-    in property <string> label;
-    in property <bool> active: false;
-    callback chosen();
-
-    background: active ? #403568 : #161b22;
-    border-radius: 7px;
-    border-width: 1px;
-    border-color: active ? #8b79d9 : #30363d;
-    height: 31px;
-    horizontal-stretch: 1;
-    Text {
-        text: root.label;
-        color: root.active ? #ffffff : #aeb8c4;
-        font-size: 10px;
-        font-weight: 700;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    TouchArea { clicked => { root.chosen(); } }
-}
-
-component NavItem inherits Rectangle {
-    in property <string> label;
-    in property <string> glyph;
-    in property <bool> active: false;
-    callback chosen();
-
-    horizontal-stretch: 1;
-    background: active ? #171626 : #0d1117;
-    VerticalLayout {
-        spacing: 2px;
-        alignment: center;
-        Text {
-            text: root.glyph;
-            color: root.active ? #ffffff : #b7a7ff;
-            font-size: 20px;
-            horizontal-alignment: center;
-        }
-        Text {
-            text: root.label;
-            color: root.active ? #d7ceff : #8b949e;
-            font-size: 9px;
-            font-weight: 800;
-            horizontal-alignment: center;
-        }
-    }
-    TouchArea { clicked => { root.chosen(); } }
 }
