@@ -918,6 +918,15 @@ fn fetch_anilist_catalog(query_text: &str, category: &str, filters: &SearchFilte
     Ok(response)
 }
 
+fn has_restricted_adult_genre(value: &Value) -> bool {
+    value.get("genres").and_then(Value::as_array).map(|genres| {
+        genres.iter().filter_map(Value::as_str).any(|genre| {
+            let genre = genre.to_ascii_lowercase();
+            genre == "hentai" || genre == "erotica" || genre == "pornographic"
+        })
+    }).unwrap_or(false)
+}
+
 fn parse_anime_records(payload: &Value, latest_mode: bool) -> Vec<AnimeRecord> {
     let Some(items) = result_array(payload) else {
         return Vec::new();
@@ -933,6 +942,8 @@ fn parse_anime_records(payload: &Value, latest_mode: bool) -> Vec<AnimeRecord> {
 
         if anime.get("isAdult").and_then(Value::as_bool) == Some(true)
             || item.get("isAdult").and_then(Value::as_bool) == Some(true)
+            || has_restricted_adult_genre(anime)
+            || has_restricted_adult_genre(item)
         {
             continue;
         }
@@ -1181,6 +1192,9 @@ fn open_anime_detail(
                 Err(_) => fetch_anilist_media_detail(&client, &id, if media_type == "MANGA" { "MANGA" } else { "ANIME" })?,
             };
             let data = payload.get("data").unwrap_or(&payload);
+            if data.get("isAdult").and_then(Value::as_bool) == Some(true) || has_restricted_adult_genre(data) {
+                return Err("This title is marked as adult and is not available in this app.".to_string());
+            }
             let description = strip_markup(
                 data.get("description")
                     .and_then(Value::as_str)
