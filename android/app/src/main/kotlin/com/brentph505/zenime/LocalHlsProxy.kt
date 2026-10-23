@@ -184,12 +184,12 @@ internal object LocalHlsProxy {
                         else -> if (status >= 500) "Bad Gateway" else "Upstream"
                     }
                     val responseHeaders = StringBuilder()
-                    responseHeaders.append("HTTP/1.1 ").append(status).append(' ').append(phrase).append("\\r\\n")
-                    responseHeaders.append("Content-Type: ").append(contentType).append("\\r\\n")
-                    upstream.getHeaderField("Content-Length")?.let { responseHeaders.append("Content-Length: ").append(it).append("\\r\\n") }
-                    upstream.getHeaderField("Content-Range")?.let { responseHeaders.append("Content-Range: ").append(it).append("\\r\\n") }
-                    upstream.getHeaderField("Accept-Ranges")?.let { responseHeaders.append("Accept-Ranges: ").append(it).append("\\r\\n") }
-                    responseHeaders.append("Connection: close\\r\\nCache-Control: no-store\\r\\nAccess-Control-Allow-Origin: *\\r\\n\\r\\n")
+                    responseHeaders.append("HTTP/1.1 ").append(status).append(' ').append(phrase).append("\r\n")
+                    responseHeaders.append("Content-Type: ").append(contentType).append("\r\n")
+                    upstream.getHeaderField("Content-Length")?.let { responseHeaders.append("Content-Length: ").append(it).append("\r\n") }
+                    upstream.getHeaderField("Content-Range")?.let { responseHeaders.append("Content-Range: ").append(it).append("\r\n") }
+                    upstream.getHeaderField("Accept-Ranges")?.let { responseHeaders.append("Accept-Ranges: ").append(it).append("\r\n") }
+                    responseHeaders.append("Connection: close\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n\r\n")
                     output.write(responseHeaders.toString().toByteArray(Charsets.US_ASCII))
                     output.flush()
                     if (method != "HEAD" && stream != null) {

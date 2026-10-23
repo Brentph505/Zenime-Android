@@ -413,7 +413,7 @@ fn episodes_anidb(client:&Client,title:&str)->Result<Vec<ProviderRow>,String>{
     let items=arr(&s,&["posts","results"]).ok_or("AniDB search was empty")?;
     let hit=best_match(title,items).ok_or("AniDB had no matching title")?;
     let key=text_first(hit,&["id"]);
-    let post=get_json(client,&format!("https://anilab2.amdapi.click/api/post?id={}",urlencoding::encode(&key)),"https://anilab2.amdapi.click/")?;
+    let _post=get_json(client,&format!("https://anilab2.amdapi.click/api/post?id={}",urlencoding::encode(&key)),"https://anilab2.amdapi.click/")?;
     let episode_payload=get_json(client,&format!("https://play.anidb.app/api/anime/{}/episodes",urlencoding::encode(&key)),"https://play.anidb.app/")?;
     let eps=arr(&episode_payload,&["list","episodes","results"]).ok_or("AniDB has no episodes")?;
     Ok(eps.iter().enumerate().map(|(i,e)|{
@@ -480,7 +480,7 @@ fn resolve_ap(client:&Client,slug:&str,episode:&str)->Result<(String,String),Str
     if !found.contains(".m3u8"){found=format!("https://stream.animeparadise.moe/m3u8?url={}",urlencoding::encode(&found))}
     Ok((found,"https://www.animeparadise.moe/".into()))
 }
-fn resolve_anipm(client:&Client,anime:&str,episode:&str,dub:bool)->Result<(String,String),String>{
+fn resolve_anipm(client:&Client,_anime:&str,episode:&str,dub:bool)->Result<(String,String),String>{
     let parts:Vec<&str>=episode.split('|').collect();
     let provider=parts.first().copied().unwrap_or("settlar");
     let source=parts.get(1).copied().unwrap_or("");
