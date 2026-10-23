@@ -1,47 +1,31 @@
 # Zenime Android
 
-Rust-powered native Android client for [Zenime](https://github.com/Brentph505/Zenime). This is a standalone mobile project; it does not replace the Zenime website.
+Rust-powered native Android client for [Zenime](https://github.com/Brentph505/Zenime). This is a separate app; it does not modify or embed the website.
 
-## App architecture
+## Native design
 
-- **Rust** owns catalog requests, title search, anime details, episode lookup, and networking.
-- **Slint** draws the interface as compiled native code; there is no WebView and no embedded website.
-- **AndroidX Media3 / ExoPlayer** handles direct HLS/MP4 playback in a native Android activity.
-- The visual style follows Zenime's existing dark palette, cards, and lavender accent.
-- Results marked as adult by the metadata API are filtered out.
+- Rust owns catalog parsing, AniList GraphQL requests, provider discovery, episode resolution, manga chapter lookup, image decoding and app state.
+- Slint renders the interface as compiled native code; there is no website WebView.
+- AndroidX Media3 / ExoPlayer plays direct HLS, MP4 and DASH media.
+- Minimum Android version is Android 8.1 (API 27), suitable for a Vivo Y91c-class device.
+- AniList is the canonical anime/manga metadata source. Adult-marked titles are filtered from results, and adult-only provider families are excluded.
 
-The native player accepts direct HLS and media URLs. It does not load provider embed pages inside a WebView, so embed-only sources may not play.
+## Data flow
 
-## Build requirements
+The app queries AniList directly over HTTPS for catalog and details. Provider requests run from the device and attempt Zenime Web's regular anime provider priority: AniKoto, AnimeParadise, 4Animo, ReAnime, KickAssAnime, AnimePahe, XAnime, AniPM and AniDB. Manga source priority is MangaHere, Atsumaru, MangaPill and MangaKatana.
 
-Install Rust, Java 17, Android SDK / NDK, CMake, Gradle 8.13, and `cargo-ndk`. The GitHub Actions workflow installs the Android SDK and NDK for hosted builds.
+A legacy metadata endpoint can be configured in Settings as a fallback, but it is no longer the default source for the catalogue or detail metadata. Direct scraping still requires an internet connection to AniList and the upstream providers. Provider URLs are visible in network traffic and APK code; the app does not attempt to bypass provider access controls.
 
-## Build locally
+Upstream provider implementations may change or use anti-bot protections. Some hosts return embed-only players or encrypted JavaScript payloads rather than direct HLS/MP4/DASH streams. The native player supports direct media manifests and cannot play arbitrary embed pages. The current port includes device-side adapters for the provider-specific endpoints and common stream extraction paths, but it must not be considered full provider parity until every resolver, subtitle path, skip-time integration and manga image decoding path is verified against live provider responses.
 
-From the repository root:
+## Features
 
-```bash
-rustup target add aarch64-linux-android
-cargo install cargo-ndk --locked
-cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build --release --lib
-cd android
-gradle --no-daemon :app:assembleDebug
-```
+The app includes AniList-backed trending/popular/top-rated catalogue views, title search with filters, anime/manga details, provider episode/chapter lists, manga reader, saved titles, local history, settings, AniList account/list hooks, and a native Media3 player. AniList OAuth and list mutations still require end-to-end verification using an OAuth client ID registered for the app's custom zenime://callback redirect.
 
-The resulting debug APK is at `android/app/build/outputs/apk/debug/app-debug.apk`. It is intended for testing, not Play Store distribution.
+## Validation
 
-## CI build
+Builds and CI have intentionally not been run during this implementation pass, as requested. The source still needs a compile pass and on-device verification before it can be called release-ready.
 
-Push to `main` or use the workflow's **Run workflow** button in GitHub Actions. The workflow builds the arm64 APK and publishes an artifact named `zenime-native-debug-apk`. Download it from the completed workflow run.
+## Attribution
 
-For public distribution, create a signed release build with a protected release keystore. Do not commit keystores, signing passwords, API keys, or other secrets.
-
-## Configuration and limitations
-
-The initial app includes Trending, Popular, Top Rated, Latest, title search, anime details, episode listing, a session-only saved list, and native direct-stream playback. The metadata / video API is configurable in the app's Settings screen. The default endpoint is a configurable example, not a guaranteed service; if it is unavailable, set a compatible Zenime / Miruro API endpoint.
-
-Backend responses and provider formats vary. In particular, direct playback is supported, but embedded-only streams are not. The APK build and app behavior must be validated on a real device before treating the app as a stable release.
-
-## Attribution and license
-
-Zenime is derived from Miruro no Kuon under the repository's custom attribution, non-commercial license. Keep the original root project's license terms and required attribution when modifying or redistributing this derivative. This project is intended for non-commercial use.
+Zenime is derived from Miruro no Kuon under the source repository's attribution and non-commercial license terms. Preserve those terms when modifying or redistributing the app.

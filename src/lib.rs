@@ -1,4 +1,5 @@
 use reqwest::blocking::Client;
+mod providers;
 use serde_json::Value;
 use slint::{Image, ModelRc, SharedString, VecModel};
 use std::collections::HashSet;
@@ -7,7 +8,7 @@ use std::time::Duration;
 
 slint::include_modules!();
 
-const DEFAULT_API_BASE: &str = "https://public-miruro-consumet-api.vercel.app/";
+const DEFAULT_API_BASE: &str = "";
 
 #[cfg(target_os = "android")]
 type PlatformApp = slint::android::AndroidApp;
@@ -273,10 +274,10 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             }
 
             std::thread::spawn(move || {
-                match find_direct_stream(&base, &episode_id, dub_enabled) {
+                match find_direct_stream(&base, &episode_id, dub_enabled, &anime_title) {
                     Ok((url, referer)) => {
                         let next_stream = if auto_next && media_type != "MANGA" {
-                            next_episode.as_ref().and_then(|episode| find_direct_stream(&base, episode.id.as_str(), dub_enabled).ok().map(|(next_url, _)| (next_url, episode.title.to_string())))
+                            next_episode.as_ref().and_then(|episode| find_direct_stream(&base, episode.id.as_str(), dub_enabled, &anime_title).ok().map(|(next_url, _)| (next_url, episode.title.to_string())))
                         } else { None };
                         #[cfg(target_os = "android")]
                         if let Some(app) = platform_app {
@@ -838,15 +839,13 @@ fn restore_cards(
 }
 
 fn api_base_for_selected(base: &SharedApiBase) -> String {
-    base.lock()
-        .map(|value| value.clone())
-        .unwrap_or_else(|_| DEFAULT_API_BASE.to_string())
+    base.lock().map(|value| value.clone()).unwrap_or_default()
 }
 
 fn normalize_base(value: &str) -> String {
     let trimmed = value.trim().trim_end_matches('/');
     if trimmed.is_empty() {
-        DEFAULT_API_BASE.to_string()
+        String::new()
     } else {
         format!("{trimmed}/")
     }
@@ -1006,15 +1005,16 @@ fn fetch_anilist_media_detail(client: &Client, id: &str, media_type: &str) -> Re
     Ok(response)
 }
 
-fn fetch_anilist_catalog(query_text: &str, category: &str, filters: &SearchFilters) -> Result<Value, String> {
-    let client = request_client()?;
+fn fetch_anilist_catalog(client: &Client, query_text: &str, category: &str, filters: &SearchFilters) -> Result<Value, String> {
     let media_type = if category == "manga" { "MANGA" } else { "ANIME" };
     let sort = if !filters.sort.trim().is_empty() { filters.sort.trim() } else { match category {
         "popular" => "POPULARITY_DESC",
         "top-rated" => "SCORE_DESC",
+        "top-airing" => "POPULARITY_DESC",
         "latest" => "TRENDING_DESC",
         _ => "TRENDING_DESC",
     }};
+    let status = if category == "top-airing" { "RELEASING" } else { filters.status.trim() };
     let query = "query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $sort: [MediaSort], $season: MediaSeason, $year: Int, $format: MediaFormat, $status: MediaStatus) { Page(page: $page, perPage: $perPage) { pageInfo { hasNextPage } media(type: $type, search: $search, sort: $sort, season: $season, seasonYear: $year, format: $format, status: $status, isAdult: false) { id title { userPreferred english romaji native } coverImage { extraLarge large medium } description format status episodes chapters averageScore popularity genres seasonYear isAdult } } }";
     let response = client.post("https://graphql.anilist.co")
         .json(&serde_json::json!({
@@ -1028,7 +1028,7 @@ fn fetch_anilist_catalog(query_text: &str, category: &str, filters: &SearchFilte
                 "season": if filters.season.is_empty() { Value::Null } else { Value::String(filters.season.clone()) },
                 "year": filters.year.parse::<i32>().ok().map_or(Value::Null, |year| serde_json::json!(year)),
                 "format": if filters.format.is_empty() { Value::Null } else { Value::String(filters.format.clone()) },
-                "status": if filters.status.is_empty() { Value::Null } else { Value::String(filters.status.clone()) }
+                "status": if status.is_empty() { Value::Null } else { Value::String(status.to_string()) }
             }
         }))
         .send()
@@ -1084,8 +1084,8 @@ fn parse_anime_records(payload: &Value, latest_mode: bool) -> Vec<AnimeRecord> {
             continue;
         }
 
-        let year = first_text(anime, &["releaseDate", "year"]);
-        let rating = first_text(anime, &["rating", "score"]);
+        let year = first_text(anime, &["releaseDate", "year", "seasonYear"]);
+        let rating = first_text(anime, &["rating", "score", "averageScore"]);
         let kind = first_text(anime, &["type", "format"]);
         let status = first_text(anime, &["status"]);
         let mut details = Vec::new();
@@ -1178,19 +1178,13 @@ fn load_catalog_with_filters(
     std::thread::spawn(move || {
         let result = (|| -> Result<Vec<AnimeCardData>, String> {
             let client = request_client()?;
-            let route = match category.as_str() {
-                "popular" => "meta/anilist/advanced-search?type=ANIME&sort=%5B%22POPULARITY_DESC%22%5D&page=1&perPage=24".to_string(),
-                "top-rated" => "meta/anilist/advanced-search?type=ANIME&sort=%5B%22SCORE_DESC%22%5D&page=1&perPage=24".to_string(),
-                "top-airing" => "meta/anilist/advanced-search?type=ANIME&status=RELEASING&sort=%5B%22POPULARITY_DESC%22%5D&page=1&perPage=24".to_string(),
-                "latest" => "meta/anilist/recent-episodes?page=1&perPage=24&provider=anikoto".to_string(),
-                "search" => advanced_search_route(&query, "ANIME", &filters),
-                "manga" => advanced_search_route(&query, "MANGA", &filters),
-                _ => "meta/anilist/trending?page=1&perPage=24".to_string(),
-            };
-            let url = api_url(&base, &route);
-            let payload = match fetch_json(&client, &url) {
-                Ok(payload) => payload,
-                Err(_) => fetch_anilist_catalog(&query, &category, &filters)?,
+            // AniList is canonical for catalogue metadata. A configured legacy
+            // endpoint is consulted only for its recent-episode feed.
+            let payload = if category == "latest" && !base.trim().is_empty() {
+                let url = api_url(&base, "meta/anilist/recent-episodes?page=1&perPage=24&provider=anikoto");
+                fetch_json(&client, &url).or_else(|_| fetch_anilist_catalog(&client, &query, &category, &filters))?
+            } else {
+                fetch_anilist_catalog(&client, &query, &category, &filters)?
             };
             let records = parse_anime_records(&payload, category == "latest");
             if records.is_empty() {
@@ -1307,17 +1301,26 @@ fn open_anime_detail(
     std::thread::spawn(move || {
         let detail = (|| -> Result<(String, String, Vec<EpisodeRowData>), String> {
             let client = request_client()?;
-            let detail_path = if media_type == "MANGA" {
-                format!("meta/anilist-manga/info/{}?provider=mangahere", urlencoding::encode(&id))
-            } else {
-                format!("meta/anilist/data/{}?provider=anikoto", urlencoding::encode(&id))
-            };
-            let detail_url = api_url(&base, &detail_path);
-            let payload = match fetch_json(&client, &detail_url) {
+            let payload = match fetch_anilist_media_detail(
+                &client, &id, if media_type == "MANGA" { "MANGA" } else { "ANIME" }
+            ) {
                 Ok(payload) => payload,
-                Err(_) => fetch_anilist_media_detail(&client, &id, if media_type == "MANGA" { "MANGA" } else { "ANIME" })?,
+                Err(anilist_error) if !base.trim().is_empty() => {
+                    let detail_path = if media_type == "MANGA" {
+                        format!("meta/anilist-manga/info/{}?provider=mangahere", urlencoding::encode(&id))
+                    } else {
+                        format!("meta/anilist/data/{}?provider=anikoto", urlencoding::encode(&id))
+                    };
+                    let detail_url = api_url(&base, &detail_path);
+                    fetch_json(&client, &detail_url).map_err(|legacy_error| {
+                        format!("AniList metadata failed: {anilist_error}; optional legacy endpoint also failed: {legacy_error}")
+                    })?
+                }
+                Err(error) => return Err(error),
             };
-            let data = payload.get("data").unwrap_or(&payload);
+            let data = payload.pointer("/data/Media")
+                .or_else(|| payload.get("data"))
+                .unwrap_or(&payload);
             if data.get("isAdult").and_then(Value::as_bool) == Some(true) || has_restricted_adult_genre(data) {
                 return Err("This title is marked as adult and is not available in this app.".to_string());
             }
@@ -1328,17 +1331,35 @@ fn open_anime_detail(
             );
             let status = first_text(data, &["status", "format", "type", "chapters", "episodes"]);
             let episodes = if media_type == "MANGA" {
-                parse_episode_rows(&payload)
+                match providers::manga_chapters(&client, &title) {
+                    Ok(rows) => rows.into_iter().map(|row| EpisodeRowData {
+                        id: SharedString::from(row.id),
+                        title: SharedString::from(row.title),
+                        details: SharedString::from(format!("Source: {}", row.provider)),
+                    }).collect(),
+                    Err(native_error) if !base.trim().is_empty() => {
+                        let url = api_url(&base, &format!(
+                            "meta/anilist-manga/info/{}?provider=mangahere", urlencoding::encode(&id)
+                        ));
+                        parse_episode_rows(&fetch_json(&client, &url).map_err(|e| format!("{native_error}; optional endpoint failed: {e}"))?)
+                    }
+                    Err(error) => return Err(error),
+                }
             } else {
-                let episodes_url = api_url(
-                    &base,
-                    &format!(
-                        "meta/anilist/episodes/{}?provider=anikoto&dub=false",
-                        urlencoding::encode(&id)
-                    ),
-                );
-                let episodes_payload = fetch_json(&client, &episodes_url).unwrap_or(Value::Null);
-                parse_episode_rows(&episodes_payload)
+                match providers::anime_episodes(&client, &title, &id, false) {
+                    Ok(rows) => rows.into_iter().map(|row| EpisodeRowData {
+                        id: SharedString::from(row.id),
+                        title: SharedString::from(row.title),
+                        details: SharedString::from(format!("Source: {}", row.provider)),
+                    }).collect(),
+                    Err(native_error) if !base.trim().is_empty() => {
+                        let url = api_url(&base, &format!(
+                            "meta/anilist/episodes/{}?provider=anikoto&dub=false", urlencoding::encode(&id)
+                        ));
+                        parse_episode_rows(&fetch_json(&client, &url).map_err(|e| format!("{native_error}; optional endpoint failed: {e}"))?)
+                    }
+                    Err(error) => return Err(error),
+                }
             };
             Ok((description, status, episodes))
         })();
@@ -1388,23 +1409,46 @@ fn load_manga_pages(weak: slint::Weak<MainWindow>, base: String, chapter_id: Str
     std::thread::spawn(move || {
         let result = (|| -> Result<Vec<(String, PosterBuffer)>, String> {
             let client = request_client()?;
-            let url = api_url(&base, &format!(
-                "meta/anilist-manga/read?chapterId={}&provider=mangahere",
-                urlencoding::encode(&chapter_id)
-            ));
-            let payload = fetch_json(&client, &url)?;
-            let items = result_array(&payload).ok_or_else(|| "No pages were returned for this chapter.".to_string())?;
+            let image_urls = if chapter_id.starts_with("znm:") {
+                providers::manga_pages(&client, &chapter_id)?
+            } else if !base.trim().is_empty() {
+                let url = api_url(&base, &format!(
+                    "meta/anilist-manga/read?chapterId={}&provider=mangahere",
+                    urlencoding::encode(&chapter_id)
+                ));
+                let payload = fetch_json(&client, &url)?;
+                result_array(&payload).ok_or_else(|| "No pages were returned for this chapter.".to_string())?
+                    .iter().map(|item| first_text(item, &["img", "image", "url", "src"]))
+                    .filter(|image| image.starts_with("https://") || image.starts_with("http://"))
+                    .collect()
+            } else {
+                return Err("This chapter has no native provider reference, and no optional legacy endpoint is configured.".into());
+            };
+            if image_urls.is_empty() { return Err("No readable page URLs were returned for this chapter.".into()); }
+            let referer = if chapter_id.starts_with("znm:") { providers::manga_referer(&chapter_id) } else { "https://mangahere.cc/" };
             let mut pages = Vec::new();
-            for (index, item) in items.iter().take(60).enumerate() {
-                let image = first_text(item, &["img", "image", "url", "src"]);
-                if !(image.starts_with("https://") || image.starts_with("http://")) { continue; }
-                let response = client.get(&image).timeout(Duration::from_secs(15)).send();
-                let Ok(response) = response.and_then(|response| response.error_for_status()) else { continue; };
-                let Ok(bytes) = response.bytes() else { continue; };
-                if let Some(pixels) = decode_manga_page(&bytes) {
-                    pages.push((format!("Page {}", index + 1), pixels));
+            // Limit concurrent downloads to four on low-memory mobile devices.
+            for (batch_index, batch) in image_urls.iter().take(60).collect::<Vec<_>>().chunks(4).enumerate() {
+                let mut workers = Vec::new();
+                for (local_index, image) in batch.iter().enumerate() {
+                    let client = client.clone();
+                    let image = (*image).clone();
+                    let referer = referer.to_string();
+                    let index = batch_index * 4 + local_index + 1;
+                    workers.push(std::thread::spawn(move || {
+                        let response = client.get(&image).header("Referer", referer)
+                            .timeout(Duration::from_secs(15)).send().and_then(|r| r.error_for_status());
+                        let bytes = response.ok()?.bytes().ok()?;
+                        decode_manga_page(&bytes).map(|pixels| (index, pixels))
+                    }));
+                }
+                for worker in workers {
+                    if let Ok(Some((index, pixels))) = worker.join() {
+                        pages.push((format!("Page {index}"), pixels));
+                    }
                 }
             }
+            pages.sort_by_key(|(label, _)| label.trim_start_matches("Page ").parse::<usize>().unwrap_or(0));
             if pages.is_empty() {
                 return Err("This chapter returned no readable pages. Try another chapter or provider.".to_string());
             }
@@ -1481,32 +1525,43 @@ fn parse_episode_rows(payload: &Value) -> Vec<EpisodeRowData> {
         .collect()
 }
 
-fn find_direct_stream(base: &str, episode_id: &str, dub: bool) -> Result<(String, String), String> {
+fn find_direct_stream(base: &str, episode_id: &str, dub: bool, anime_title: &str) -> Result<(String, String), String> {
     let client = request_client()?;
-    for provider in ["anikoto", "animepahe", "reanime", "kickassanime"] {
+    let native_error = if episode_id.starts_with("zn:") {
+        match providers::resolve_episode(&client, episode_id, anime_title, dub) {
+            Ok(result) => return Ok(result),
+            Err(error) => error,
+        }
+    } else {
+        "The episode row has no native provider reference.".to_string()
+    };
+
+    // A legacy endpoint remains optional for older setups; native scrapers are attempted first.
+    if base.trim().is_empty() {
+        return Err(native_error);
+    }
+    let original_id = providers::unpack_episode_id(episode_id).unwrap_or_else(|| episode_id.to_string());
+    let mut last_error = native_error;
+    for provider in ["anikoto", "animeparadise", "4animo", "reanime", "kickassanime", "animepahe", "xanime", "anipm", "anidb"] {
         let route = format!(
             "meta/anilist/watch?episodeId={}&provider={}&dub={}",
-            urlencoding::encode(episode_id),
+            urlencoding::encode(&original_id),
             urlencoding::encode(provider),
             if dub { "true" } else { "false" }
         );
         let url = api_url(base, &route);
-        let Ok(payload) = fetch_json(&client, &url) else {
-            continue;
-        };
-        if let Some((stream, source_referer)) = direct_source(&payload) {
-            let referer = if source_referer.is_empty() {
-                provider_referer(provider).to_string()
-            } else {
-                source_referer
-            };
-            return Ok((stream, referer));
+        match fetch_json(&client, &url) {
+            Ok(payload) => if let Some((stream, source_referer)) = direct_source(&payload) {
+                let referer = if source_referer.is_empty() {
+                    provider_referer(provider).to_string()
+                } else { source_referer };
+                return Ok((stream, referer));
+            },
+            Err(error) => last_error = error,
         }
     }
-
-    Err("No direct HLS/MP4 source was returned. This app avoids WebViews, so embed-only provider pages are not playable in the native player.".to_string())
+    Err(format!("{last_error}; no playable source was found from native provider requests or the optional legacy endpoint."))
 }
-
 fn direct_source(payload: &Value) -> Option<(String, String)> {
     let data = payload.get("data").unwrap_or(payload);
     let sources = data.get("sources").and_then(Value::as_array)?;
@@ -1538,10 +1593,15 @@ fn is_direct_media(url: &str) -> bool {
 
 fn provider_referer(provider: &str) -> &'static str {
     match provider {
-        "animepahe" => "https://animepahe.com/",
+        "animeparadise" => "https://www.animeparadise.moe/",
+        "4animo" => "https://zanix.tr/",
+        "animepahe" => "https://animepahe.pw/",
         "reanime" => "https://reanime.to/",
-        "kickassanime" => "https://krussdomi.com/",
-        _ => "https://anikoto.to/",
+        "kickassanime" => "https://kaa.lt/",
+        "xanime" => "https://xanime.me/",
+        "anipm" => "https://ani.pm/",
+        "anidb" => "https://anidb.app/",
+        _ => "https://anikototv.to/",
     }
 }
 

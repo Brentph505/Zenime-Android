@@ -714,7 +714,7 @@ export component MainWindow inherits Window {
                     font-weight: 700;
                 }
                 Text {
-                    text: "Use a compatible Zenime / Miruro metadata backend. The app connects directly over HTTPS.";
+                    text: "AniList metadata and regular providers are queried directly on this device. A legacy endpoint is optional for compatibility.";
                     color: #9da7b3;
                     font-size: 11px;
                     wrap: word-wrap;
@@ -723,14 +723,14 @@ export component MainWindow inherits Window {
                     width: parent.width;
                     height: 44px;
                     text <=> root.api-url;
-                    placeholder-text: "https://example.com/";
+                    placeholder-text: "Optional legacy API endpoint (https://...)";
                 }
                 Rectangle {
                     height: 43px;
                     background: #8b79d9;
                     border-radius: 8px;
                     Text {
-                        text: "Save endpoint and refresh";
+                        text: "Save optional endpoint and refresh";
                         color: #ffffff;
                         font-size: 12px;
                         font-weight: 800;
