@@ -13,6 +13,11 @@ export struct EpisodeRowData {
     details: string,
 }
 
+export struct MangaPageData {
+    number: string,
+    page: image,
+}
+
 component AnimeTile inherits Rectangle {
     in property <AnimeCardData> anime;
     callback chosen(string, string, image);
@@ -123,6 +128,7 @@ export component MainWindow inherits Window {
 
     in-out property <[AnimeCardData]> anime-cards: [];
     in-out property <[EpisodeRowData]> episodes: [];
+    in-out property <[MangaPageData]> manga-pages: [];
     in-out property <[AnimeCardData]> saved-cards: [];
     in-out property <[AnimeCardData]> history-cards: [];
     in-out property <string> search-kind: "ANIME";
@@ -471,6 +477,27 @@ export component MainWindow inherits Window {
                         anime: anime;
                         chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
                     }
+                }
+            }
+        }
+
+        if root.active-page == "reader" : ScrollView {
+            VerticalLayout {
+                padding: 10px; spacing: 10px;
+                HorizontalLayout {
+                    height: 38px; spacing: 8px;
+                    Rectangle {
+                        width: 70px; background: #292340; border-radius: 7px;
+                        Text { text: "‹ Back"; color: #d7ceff; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.navigate("detail"); } }
+                    }
+                    Text { text: root.selected-title; color: #f0f2f5; font-size: 14px; font-weight: 800; vertical-alignment: center; overflow: elide; }
+                }
+                Text { text: root.status; color: #9da7b3; font-size: 11px; wrap: word-wrap; }
+                for page in root.manga-pages: VerticalLayout {
+                    spacing: 3px;
+                    Text { text: page.number; color: #b7a7ff; font-size: 10px; horizontal-alignment: center; }
+                    Image { source: page.page; image-fit: contain; width: parent.width; height: 520px; }
                 }
             }
         }
