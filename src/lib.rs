@@ -886,7 +886,17 @@ fn load_catalog(
     category: String,
     query: String,
 ) {
-    set_status(&weak, "Loading anime catalog…");
+    load_catalog_with_filters(weak, api_base, category, query, SearchFilters::default());
+}
+
+fn load_catalog_with_filters(
+    weak: slint::Weak<MainWindow>,
+    api_base: SharedApiBase,
+    category: String,
+    query: String,
+    filters: SearchFilters,
+) {
+    set_status(&weak, "Loading catalog…");
     let base = api_base_for_selected(&api_base);
 
     std::thread::spawn(move || {
