@@ -707,6 +707,7 @@ fn load_catalog(
                             id: SharedString::from(record.id),
                             title: SharedString::from(record.title),
                             details: SharedString::from(record.details),
+                            image_url: SharedString::from(record.image_url),
                             poster: Image::from_rgba8(pixels),
                         })
                         .collect();
@@ -747,6 +748,7 @@ fn open_anime_detail(
         id: SharedString::from(id.clone()),
         title: SharedString::from(title.clone()),
         details: SharedString::from(if media_type == "MANGA" { "Manga" } else { "Anime" }),
+        image_url: SharedString::from(""),
         poster: poster.clone(),
     };
 
