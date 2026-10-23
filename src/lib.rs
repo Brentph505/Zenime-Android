@@ -86,6 +86,10 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     #[cfg(not(target_os = "android"))]
     let auto_play = true;
     #[cfg(target_os = "android")]
+    let dub_enabled = platform_app.as_ref().and_then(|app| read_android_preference(app, "default_language")).map(|value| value == "dub").unwrap_or(false);
+    #[cfg(not(target_os = "android"))]
+    let dub_enabled = false;
+    #[cfg(target_os = "android")]
     let auto_next = platform_app.as_ref().and_then(|app| read_android_preference(app, "auto_next")).map(|value| value == "true").unwrap_or(false);
     #[cfg(not(target_os = "android"))]
     let auto_next = false;
@@ -112,6 +116,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     ui.set_auto_play(auto_play);
     ui.set_auto_next(auto_next);
     ui.set_skip_intro(skip_intro);
+    ui.set_dub_enabled(dub_enabled);
     ui.set_status(SharedString::from("Loading trending anime…"));
 
     {
@@ -233,6 +238,10 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             let episode_id = episode_id.to_string();
             let anime_title = chosen.title.clone();
             let media_type = chosen.media_type.clone();
+            #[cfg(target_os = "android")]
+            let dub_enabled = platform_app.as_ref().and_then(|app| read_android_preference(app, "default_language")).map(|value| value == "dub").unwrap_or(false);
+            #[cfg(not(target_os = "android"))]
+            let dub_enabled = false;
             let queued = episode_queue.lock().map(|items| items.clone()).unwrap_or_default();
             let next_episode = queued.iter().position(|episode| episode.id.to_string() == episode_id)
                 .and_then(|index| queued.get(index + 1).cloned());
@@ -264,10 +273,10 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             }
 
             std::thread::spawn(move || {
-                match find_direct_stream(&base, &episode_id) {
+                match find_direct_stream(&base, &episode_id, dub_enabled) {
                     Ok((url, referer)) => {
                         let next_stream = if auto_next && media_type != "MANGA" {
-                            next_episode.as_ref().and_then(|episode| find_direct_stream(&base, episode.id.as_str()).ok().map(|(next_url, _)| (next_url, episode.title.to_string())))
+                            next_episode.as_ref().and_then(|episode| find_direct_stream(&base, episode.id.as_str(), dub_enabled).ok().map(|(next_url, _)| (next_url, episode.title.to_string())))
                         } else { None };
                         #[cfg(target_os = "android")]
                         if let Some(app) = platform_app {
@@ -521,6 +530,19 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                     }
                 });
             });
+        });
+    }
+
+    {
+        let weak = weak.clone();
+        let platform_app = platform_app.clone();
+        ui.on_language_selected(move |dub_enabled| {
+            #[cfg(target_os = "android")]
+            if let Some(app) = platform_app.as_ref() {
+                write_android_preference(app, "default_language", if dub_enabled { "dub" } else { "sub" });
+            }
+            let _ = dub_enabled;
+            set_status(&weak, if dub_enabled { "Default audio set to dub." } else { "Default audio set to subtitles." });
         });
     }
 
@@ -1267,13 +1289,14 @@ fn parse_episode_rows(payload: &Value) -> Vec<EpisodeRowData> {
         .collect()
 }
 
-fn find_direct_stream(base: &str, episode_id: &str) -> Result<(String, String), String> {
+fn find_direct_stream(base: &str, episode_id: &str, dub: bool) -> Result<(String, String), String> {
     let client = request_client()?;
     for provider in ["anikoto", "animepahe", "reanime", "kickassanime"] {
         let route = format!(
-            "meta/anilist/watch?episodeId={}&provider={}",
+            "meta/anilist/watch?episodeId={}&provider={}&dub={}",
             urlencoding::encode(episode_id),
-            urlencoding::encode(provider)
+            urlencoding::encode(provider),
+            if dub { "true" } else { "false" }
         );
         let url = api_url(base, &route);
         let Ok(payload) = fetch_json(&client, &url) else {
