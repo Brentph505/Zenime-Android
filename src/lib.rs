@@ -129,7 +129,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let selected = selected.clone();
         let selected_card = selected_card.clone();
         let category_state = current_category.clone();
-        ui.on_anime_selected(move |id, title, poster| {
+        ui.on_anime_selected(move |id, title, image_url, poster| {
             let category = category_state.lock().map(|value| value.clone()).unwrap_or_else(|_| "trending".to_string());
             let media_type = if category == "manga" { "MANGA" } else { "ANIME" };
             open_anime_detail(
@@ -140,6 +140,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                 id.to_string(),
                 title.to_string(),
                 media_type.to_string(),
+                image_url.to_string(),
                 poster,
             );
         });
@@ -742,13 +743,14 @@ fn open_anime_detail(
     id: String,
     title: String,
     media_type: String,
+    image_url: String,
     poster: Image,
 ) {
     let card = AnimeCardData {
         id: SharedString::from(id.clone()),
         title: SharedString::from(title.clone()),
         details: SharedString::from(if media_type == "MANGA" { "Manga" } else { "Anime" }),
-        image_url: SharedString::from(""),
+        image_url: SharedString::from(image_url.clone()),
         poster: poster.clone(),
     };
 
