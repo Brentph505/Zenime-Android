@@ -680,6 +680,8 @@ fn result_array(payload: &Value) -> Option<&Vec<Value>> {
         .or_else(|| data.get("episodes").and_then(Value::as_array))
         .or_else(|| data.get("chapters").and_then(Value::as_array))
         .or_else(|| data.get("pages").and_then(Value::as_array))
+        .or_else(|| data.get("Page").and_then(|page| page.get("media")).and_then(Value::as_array))
+        .or_else(|| data.get("media").and_then(Value::as_array))
         .or_else(|| payload.get("chapters").and_then(Value::as_array))
         .or_else(|| payload.get("pages").and_then(Value::as_array))
 }
@@ -733,6 +735,40 @@ fn image_url(value: &Value) -> String {
         }
     }
     String::new()
+}
+
+fn fetch_anilist_catalog(query_text: &str, category: &str) -> Result<Value, String> {
+    let client = request_client()?;
+    let media_type = if category == "manga" { "MANGA" } else { "ANIME" };
+    let sort = match category {
+        "popular" => "POPULARITY_DESC",
+        "top-rated" => "SCORE_DESC",
+        "latest" => "TRENDING_DESC",
+        _ => "TRENDING_DESC",
+    };
+    let query = "query ($page: Int, $perPage: Int, $search: String, $type: MediaType, $sort: [MediaSort]) { Page(page: $page, perPage: $perPage) { pageInfo { hasNextPage } media(type: $type, search: $search, sort: $sort, isAdult: false) { id title { userPreferred english romaji native } coverImage { extraLarge large medium } description format status episodes chapters averageScore popularity genres seasonYear isAdult } } }";
+    let response = client.post("https://graphql.anilist.co")
+        .json(&serde_json::json!({
+            "query": query,
+            "variables": {
+                "page": 1,
+                "perPage": 24,
+                "search": if query_text.trim().is_empty() { Value::Null } else { Value::String(query_text.to_string()) },
+                "type": media_type,
+                "sort": [sort]
+            }
+        }))
+        .send()
+        .map_err(|error| format!("AniList catalog request failed: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("AniList catalog returned an error: {error}"))?
+        .json::<Value>()
+        .map_err(|error| format!("AniList returned invalid catalog data: {error}"))?;
+    if let Some(errors) = response.get("errors").and_then(Value::as_array) {
+        let message = errors.first().and_then(|item| item.get("message")).and_then(Value::as_str).unwrap_or("AniList catalog query failed.");
+        return Err(message.to_string());
+    }
+    Ok(response)
 }
 
 fn parse_anime_records(payload: &Value, latest_mode: bool) -> Vec<AnimeRecord> {
@@ -863,7 +899,10 @@ fn load_catalog(
                 _ => "meta/anilist/trending?page=1&perPage=24".to_string(),
             };
             let url = api_url(&base, &route);
-            let payload = fetch_json(&client, &url)?;
+            let payload = match fetch_json(&client, &url) {
+                Ok(payload) => payload,
+                Err(_) => fetch_anilist_catalog(&query, &category)?,
+            };
             let records = parse_anime_records(&payload, category == "latest");
             if records.is_empty() {
                 return Err("The API returned no anime. Try another category or check the API URL in Settings.".to_string());
