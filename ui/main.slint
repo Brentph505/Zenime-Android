@@ -40,7 +40,7 @@ component AnimeTile inherits Rectangle {
                 color: #e6edf3;
                 font-size: 13px;
                 font-weight: 700;
-                wrap: word;
+                wrap: word-wrap;
                 overflow: elide;
                 vertical-stretch: 1;
             }
@@ -295,13 +295,14 @@ export component MainWindow inherits Window {
                     text: root.status;
                     color: #9da7b3;
                     font-size: 11px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
 
                 GridLayout {
-                    columns: 2;
                     spacing: 11px;
-                    for anime in root.anime-cards: AnimeTile {
+                    for anime[index] in root.anime-cards: AnimeTile {
+                        col: index.mod(2);
+                        row: index / 2;
                         anime: anime;
                         chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
                     }
@@ -349,12 +350,13 @@ export component MainWindow inherits Window {
                     text: root.status;
                     color: #9da7b3;
                     font-size: 11px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 GridLayout {
-                    columns: 2;
                     spacing: 11px;
-                    for anime in root.anime-cards: AnimeTile {
+                    for anime[index] in root.anime-cards: AnimeTile {
+                        col: index.mod(2);
+                        row: index / 2;
                         anime: anime;
                         chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
                     }
@@ -392,7 +394,7 @@ export component MainWindow inherits Window {
                     color: #f0f2f5;
                     font-size: 23px;
                     font-weight: 800;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 Text {
                     text: root.selected-meta;
@@ -403,7 +405,7 @@ export component MainWindow inherits Window {
                     text: root.selected-description;
                     color: #aeb8c4;
                     font-size: 12px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 Rectangle {
                     height: 42px;
@@ -429,7 +431,7 @@ export component MainWindow inherits Window {
                     text: root.status;
                     color: #9da7b3;
                     font-size: 11px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 for episode in root.episodes: EpisodeTile {
                     episode: episode;
@@ -452,12 +454,13 @@ export component MainWindow inherits Window {
                     text: root.status;
                     color: #9da7b3;
                     font-size: 11px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 GridLayout {
-                    columns: 2;
                     spacing: 11px;
-                    for anime in root.saved-cards: AnimeTile {
+                    for anime[index] in root.saved-cards: AnimeTile {
+                        col: index.mod(2);
+                        row: index / 2;
                         anime: anime;
                         chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
                     }
@@ -485,7 +488,7 @@ export component MainWindow inherits Window {
                     text: "Use a compatible Zenime / Miruro metadata backend. The app connects directly over HTTPS.";
                     color: #9da7b3;
                     font-size: 11px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 LineEdit {
                     width: parent.width;
@@ -518,19 +521,19 @@ export component MainWindow inherits Window {
                     text: "A Rust-powered native Android client. The interface is compiled native code and the video screen uses Android Media3; this app does not embed a website or WebView.";
                     color: #9da7b3;
                     font-size: 12px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 Text {
                     text: "Attribution: Zenime is a non-commercial fork derived from Miruro no Kuon. Please retain the root repository's attribution and non-commercial license when redistributing.";
                     color: #8b949e;
                     font-size: 10px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 Text {
                     text: root.status;
                     color: #9da7b3;
                     font-size: 11px;
-                    wrap: word;
+                    wrap: word-wrap;
                 }
                 Rectangle {
                     height: 38px;
