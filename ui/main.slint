@@ -185,12 +185,11 @@ export component MainWindow inherits Window {
                 padding-right: 15px;
                 spacing: 9px;
                 alignment: center;
-                Text {
-                    text: "zenime";
-                    color: #f0f2f5;
-                    font-size: 28px;
-                    font-weight: 800;
-                    letter-spacing: -1px;
+                Image {
+                    source: @image-url("assets/zenime-text-transparent-white.webp");
+                    width: 104px;
+                    height: 34px;
+                    image-fit: contain;
                 }
                 Rectangle {
                     width: 6px;
@@ -236,6 +235,13 @@ export component MainWindow inherits Window {
                     background: #171626;
                     border-radius: 12px;
                     clip: true;
+                    Image {
+                        source: @image-url("assets/zenime-discover-banner.webp");
+                        width: parent.width;
+                        height: parent.height;
+                        image-fit: cover;
+                        opacity: 0.28;
+                    }
                     Rectangle {
                         x: parent.width - 92px;
                         y: -35px;
@@ -830,13 +836,13 @@ export component MainWindow inherits Window {
             border-color: #21262d;
             HorizontalLayout {
                 spacing: 0px;
-                NavItem { label: "HOME"; glyph: "⌂"; chosen => { root.navigate("home"); } }
-                NavItem { label: "SEARCH"; glyph: "⌕"; chosen => { root.navigate("search"); } }
-                NavItem { label: "SAVED"; glyph: "♡"; chosen => { root.navigate("saved"); } }
-                NavItem { label: "HISTORY"; glyph: "◷"; chosen => { root.navigate("history"); } }
-                NavItem { label: "MANGA"; glyph: "▤"; chosen => { root.navigate("manga"); } }
-                NavItem { label: "PROFILE"; glyph: "●"; chosen => { root.navigate("profile"); } }
-                NavItem { label: "SETTINGS"; glyph: "⚙"; chosen => { root.navigate("settings"); } }
+                NavItem { label: "HOME"; glyph: "⌂"; active: root.active-page == "home"; chosen => { root.navigate("home"); } }
+                NavItem { label: "SEARCH"; glyph: "⌕"; active: root.active-page == "search"; chosen => { root.navigate("search"); } }
+                NavItem { label: "SAVED"; glyph: "♡"; active: root.active-page == "saved"; chosen => { root.navigate("saved"); } }
+                NavItem { label: "HISTORY"; glyph: "◷"; active: root.active-page == "history"; chosen => { root.navigate("history"); } }
+                NavItem { label: "MANGA"; glyph: "▤"; active: root.active-page == "manga"; chosen => { root.navigate("manga"); } }
+                NavItem { label: "PROFILE"; glyph: "●"; active: root.active-page == "profile"; chosen => { root.navigate("profile"); } }
+                NavItem { label: "SETTINGS"; glyph: "⚙"; active: root.active-page == "settings"; chosen => { root.navigate("settings"); } }
             }
         }
     }
@@ -867,22 +873,23 @@ component CategoryChip inherits Rectangle {
 component NavItem inherits Rectangle {
     in property <string> label;
     in property <string> glyph;
+    in property <bool> active: false;
     callback chosen();
 
     horizontal-stretch: 1;
-    background: #0d1117;
+    background: active ? #171626 : #0d1117;
     VerticalLayout {
         spacing: 2px;
         alignment: center;
         Text {
             text: root.glyph;
-            color: #b7a7ff;
+            color: root.active ? #ffffff : #b7a7ff;
             font-size: 20px;
             horizontal-alignment: center;
         }
         Text {
             text: root.label;
-            color: #8b949e;
+            color: root.active ? #d7ceff : #8b949e;
             font-size: 9px;
             font-weight: 800;
             horizontal-alignment: center;
