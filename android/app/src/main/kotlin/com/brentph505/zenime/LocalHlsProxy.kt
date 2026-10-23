@@ -169,15 +169,41 @@ internal object LocalHlsProxy {
                 headers["range"]?.let { upstream.setRequestProperty("Range", it) }
                 val status = upstream.responseCode
                 val contentType = upstream.contentType ?: "application/octet-stream"
-                val stream = if (status >= 400) upstream.errorStream else upstream.inputStream
-                val bytes = if (method == "HEAD" || stream == null) ByteArray(0) else readAll(stream, MAX_PLAYLIST_BYTES)
                 val isPlaylist = target.substringBefore('?').lowercase().endsWith(".m3u8") ||
-                    contentType.contains("mpegurl", ignoreCase = true) ||
-                    String(bytes, Charsets.UTF_8).trimStart().startsWith("#EXTM3U")
-                val body = if (isPlaylist && method != "HEAD") {
-                    rewritePlaylist(String(bytes, Charsets.UTF_8), target, referer)
-                } else bytes
-                writeResponse(output, status, contentType, body, if (isPlaylist) null else upstream.getHeaderField("Content-Range"))
+                    contentType.contains("mpegurl", ignoreCase = true)
+                val stream = if (status >= 400) upstream.errorStream else upstream.inputStream
+                if (isPlaylist) {
+                    val bytes = if (method == "HEAD" || stream == null) ByteArray(0) else readAll(stream, MAX_PLAYLIST_BYTES)
+                    val body = if (method == "HEAD") ByteArray(0) else rewritePlaylist(String(bytes, Charsets.UTF_8), target, referer)
+                    writeResponse(output, status, contentType, body)
+                } else {
+                    // Stream segments/keys progressively instead of buffering large video chunks in RAM.
+                    val phrase = when (status) {
+                        200 -> "OK"; 206 -> "Partial Content"; 400 -> "Bad Request"
+                        403 -> "Forbidden"; 404 -> "Not Found"; 416 -> "Range Not Satisfiable"
+                        else -> if (status >= 500) "Bad Gateway" else "Upstream"
+                    }
+                    val responseHeaders = StringBuilder()
+                    responseHeaders.append("HTTP/1.1 ").append(status).append(' ').append(phrase).append("\\r\\n")
+                    responseHeaders.append("Content-Type: ").append(contentType).append("\\r\\n")
+                    upstream.getHeaderField("Content-Length")?.let { responseHeaders.append("Content-Length: ").append(it).append("\\r\\n") }
+                    upstream.getHeaderField("Content-Range")?.let { responseHeaders.append("Content-Range: ").append(it).append("\\r\\n") }
+                    upstream.getHeaderField("Accept-Ranges")?.let { responseHeaders.append("Accept-Ranges: ").append(it).append("\\r\\n") }
+                    responseHeaders.append("Connection: close\\r\\nCache-Control: no-store\\r\\nAccess-Control-Allow-Origin: *\\r\\n\\r\\n")
+                    output.write(responseHeaders.toString().toByteArray(Charsets.US_ASCII))
+                    output.flush()
+                    if (method != "HEAD" && stream != null) {
+                        stream.use { source ->
+                            val buffer = ByteArray(32 * 1024)
+                            while (true) {
+                                val count = source.read(buffer)
+                                if (count < 0) break
+                                output.write(buffer, 0, count)
+                                output.flush()
+                            }
+                        }
+                    }
+                }
             } catch (_: Exception) {
                 try { writeResponse(output, 502, "text/plain", "Upstream media request failed".toByteArray()) } catch (_: Exception) {}
             } finally {
