@@ -33,8 +33,8 @@ struct SelectedAnime {
 type SharedApiBase = Arc<Mutex<String>>;
 type SharedSelected = Arc<Mutex<SelectedAnime>>;
 type SharedCard = Arc<Mutex<Option<AnimeCardData>>>;
-type SharedSaved = Arc<Mutex<Vec<AnimeCardData>>>;
-type SharedHistory = Arc<Mutex<Vec<AnimeCardData>>>;
+type SharedSaved = Arc<Mutex<Vec<AnimeRecord>>>;
+type SharedHistory = Arc<Mutex<Vec<AnimeRecord>>>;
 type SharedEpisodeQueue = Arc<Mutex<Vec<EpisodeRowData>>>;
 
 #[derive(Clone, Default)]
@@ -251,21 +251,20 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             #[cfg(not(target_os = "android"))]
             let auto_next = false;
             if let Some(card) = selected_card.lock().ok().and_then(|card| card.clone()) {
+                let record = record_from_card(&card);
+                let mut updated = None;
                 if let Ok(mut items) = history.lock() {
-                    items.retain(|item| item.id != card.id);
-                    items.insert(0, card);
+                    items.retain(|item| item.id != record.id);
+                    items.insert(0, record);
                     items.truncate(50);
                     #[cfg(target_os = "android")]
                     if let Some(app) = platform_app.as_ref() {
-                        write_android_preference(app, "history_items", &serialize_cards(&items));
+                        write_android_preference(app, "history_items", &serialize_records(&items));
                     }
-                    let copy = items.clone();
-                    let weak_for_ui = weak.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(window) = weak_for_ui.upgrade() {
-                            window.set_history_cards(ModelRc::new(VecModel::from(copy)));
-                        }
-                    });
+                    updated = Some(items.clone());
+                }
+                if let Some(records) = updated {
+                    load_records_into_model(weak.clone(), records, true);
                 }
             }
             if media_type == "MANGA" {
@@ -311,24 +310,24 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                 set_status(&weak, "Open an anime before saving it.");
                 return;
             };
-
+            let record = record_from_card(&card);
             let mut status = "Saved to your library.".to_string();
+            let mut updated = None;
             if let Ok(mut items) = saved.lock() {
-                if let Some(index) = items.iter().position(|item| item.id == card.id) {
+                if let Some(index) = items.iter().position(|item| item.id == record.id) {
                     items.remove(index);
                     status = "Removed from your library.".to_string();
                 } else {
-                    items.push(card);
+                    items.push(record);
                 }
-
-                let copy = items.clone();
                 #[cfg(target_os = "android")]
                 if let Some(app) = platform_app.as_ref() {
-                    write_android_preference(app, "saved_items", &serialize_cards(&items));
+                    write_android_preference(app, "saved_items", &serialize_records(&items));
                 }
-                if let Some(window) = weak.upgrade() {
-                    window.set_saved_cards(ModelRc::new(VecModel::from(copy)));
-                }
+                updated = Some(items.clone());
+            }
+            if let Some(records) = updated {
+                load_records_into_model(weak.clone(), records, false);
             }
             set_status(&weak, &status);
         });
@@ -779,14 +778,65 @@ fn fetch_anilist_profile(token: &str) -> Result<(String, String), String> {
     Ok((if name.is_empty() { "AniList user".to_string() } else { name }, summary))
 }
 
-fn serialize_cards(cards: &[AnimeCardData]) -> String {
-    let records = cards.iter().map(|card| serde_json::json!({
-        "id": card.id.to_string(),
-        "title": card.title.to_string(),
-        "details": card.details.to_string(),
-        "image_url": card.image_url.to_string(),
+fn record_from_card(card: &AnimeCardData) -> AnimeRecord {
+    AnimeRecord {
+        id: card.id.to_string(),
+        title: card.title.to_string(),
+        details: card.details.to_string(),
+        image_url: card.image_url.to_string(),
+    }
+}
+
+fn card_from_record(record: AnimeRecord, pixels: PosterBuffer) -> AnimeCardData {
+    AnimeCardData {
+        id: SharedString::from(record.id),
+        title: SharedString::from(record.title),
+        details: SharedString::from(record.details),
+        image_url: SharedString::from(record.image_url),
+        poster: Image::from_rgba8(pixels),
+    }
+}
+
+fn serialize_records(records: &[AnimeRecord]) -> String {
+    let value = records.iter().map(|record| serde_json::json!({
+        "id": record.id.as_str(),
+        "title": record.title.as_str(),
+        "details": record.details.as_str(),
+        "image_url": record.image_url.as_str(),
     })).collect::<Vec<_>>();
-    serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string())
+    serde_json::to_string(&value).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn load_records_into_model(weak: slint::Weak<MainWindow>, records: Vec<AnimeRecord>, is_history: bool) {
+    std::thread::spawn(move || {
+        let Ok(client) = request_client() else { return; };
+        let mut loaded: Vec<(AnimeRecord, PosterBuffer)> = Vec::with_capacity(records.len());
+        for group in records.chunks(4) {
+            let mut workers = Vec::new();
+            for record in group.iter().cloned() {
+                let client = client.clone();
+                workers.push(std::thread::spawn(move || {
+                    let pixels = load_poster(&client, &record.image_url);
+                    (record, pixels)
+                }));
+            }
+            for worker in workers {
+                if let Ok(item) = worker.join() { loaded.push(item); }
+            }
+        }
+        let _ = slint::invoke_from_event_loop(move || {
+            let cards = loaded.into_iter()
+                .map(|(record, pixels)| card_from_record(record, pixels))
+                .collect::<Vec<_>>();
+            if let Some(window) = weak.upgrade() {
+                if is_history {
+                    window.set_history_cards(ModelRc::new(VecModel::from(cards)));
+                } else {
+                    window.set_saved_cards(ModelRc::new(VecModel::from(cards)));
+                }
+            }
+        });
+    });
 }
 
 #[cfg(target_os = "android")]
@@ -812,30 +862,8 @@ fn restore_cards(
         })
     }).collect::<Vec<_>>();
     if records.is_empty() { return; }
-    std::thread::spawn(move || {
-        let Ok(client) = request_client() else { return; };
-        let mut cards = Vec::new();
-        for record in records {
-            let pixels = load_poster(&client, &record.image_url);
-            cards.push(AnimeCardData {
-                id: SharedString::from(record.id),
-                title: SharedString::from(record.title),
-                details: SharedString::from(record.details),
-                image_url: SharedString::from(record.image_url),
-                poster: Image::from_rgba8(pixels),
-            });
-        }
-        if let Ok(mut current) = target.lock() { *current = cards.clone(); }
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(window) = weak.upgrade() {
-                if is_history {
-                    window.set_history_cards(ModelRc::new(VecModel::from(cards)));
-                } else {
-                    window.set_saved_cards(ModelRc::new(VecModel::from(cards)));
-                }
-            }
-        });
-    });
+    if let Ok(mut current) = target.lock() { *current = records.clone(); }
+    load_records_into_model(weak, records, is_history);
 }
 
 fn api_base_for_selected(base: &SharedApiBase) -> String {
@@ -981,7 +1009,8 @@ fn advanced_search_route(query: &str, media_type: &str, filters: &SearchFilters)
         }
     }
     let sort = if filters.sort.trim().is_empty() { "POPULARITY_DESC" } else { filters.sort.trim() };
-    let encoded_sort = urlencoding::encode(&format!("[\"{}\"]", sort));
+    let sort_json = format!("[\"{}\"]", sort);
+    let encoded_sort = urlencoding::encode(&sort_json);
     route.push_str("&sort=");
     route.push_str(encoded_sort.as_ref());
     route
@@ -1176,7 +1205,7 @@ fn load_catalog_with_filters(
     let base = api_base_for_selected(&api_base);
 
     std::thread::spawn(move || {
-        let result = (|| -> Result<Vec<AnimeCardData>, String> {
+        let result = (|| -> Result<Vec<(AnimeRecord, PosterBuffer)>, String> {
             let client = request_client()?;
             // AniList is canonical for catalogue metadata. A configured legacy
             // endpoint is consulted only for its recent-episode feed.
@@ -1222,13 +1251,7 @@ fn load_catalog_with_filters(
                 let _ = slint::invoke_from_event_loop(move || {
                     let cards: Vec<AnimeCardData> = loaded
                         .into_iter()
-                        .map(|(record, pixels)| AnimeCardData {
-                            id: SharedString::from(record.id),
-                            title: SharedString::from(record.title),
-                            details: SharedString::from(record.details),
-                            image_url: SharedString::from(record.image_url),
-                            poster: Image::from_rgba8(pixels),
-                        })
+                        .map(|(record, pixels)| card_from_record(record, pixels))
                         .collect();
                     if let Some(window) = weak_for_ui.upgrade() {
                         window.set_anime_cards(ModelRc::new(VecModel::from(cards)));
@@ -1615,10 +1638,10 @@ fn provider_referer(provider: &str) -> &'static str {
 #[cfg(target_os = "android")]
 fn read_android_preference(app: &PlatformApp, key: &str) -> Option<String> {
     let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
-    let vm = unsafe { jni::JavaVM::from_raw(vm_ptr) }.ok()?;
+    let vm = unsafe { jni::JavaVM::from_raw(vm_ptr) };
     vm.attach_current_thread(|mut env| -> jni::errors::Result<Option<String>> {
         let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
-        let activity = unsafe { jni::objects::JObject::from_raw(activity_raw) };
+        let activity = unsafe { jni::objects::JObject::from_raw(&env, activity_raw) };
         let name = env.new_string("zenime_native")?;
         let name_obj: jni::objects::JObject = name.into();
         let prefs = env.call_method(
@@ -1645,10 +1668,10 @@ fn read_android_preference(app: &PlatformApp, key: &str) -> Option<String> {
 #[cfg(target_os = "android")]
 fn write_android_preference(app: &PlatformApp, key: &str, value: &str) {
     let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
-    let Ok(vm) = (unsafe { jni::JavaVM::from_raw(vm_ptr) }) else { return; };
+    let vm = unsafe { jni::JavaVM::from_raw(vm_ptr) };
     let _ = vm.attach_current_thread(|mut env| -> jni::errors::Result<()> {
         let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
-        let activity = unsafe { jni::objects::JObject::from_raw(activity_raw) };
+        let activity = unsafe { jni::objects::JObject::from_raw(&env, activity_raw) };
         let name = env.new_string("zenime_native")?;
         let name_obj: jni::objects::JObject = name.into();
         let prefs = env.call_method(
@@ -1675,10 +1698,10 @@ fn write_android_preference(app: &PlatformApp, key: &str, value: &str) {
 fn open_external_url(app: PlatformApp, url: String) {
     app.run_on_java_main_thread(Box::new(move || {
         let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
-        let Ok(vm) = (unsafe { jni::JavaVM::from_raw(vm_ptr) }) else { return; };
+        let vm = unsafe { jni::JavaVM::from_raw(vm_ptr) };
         let _ = vm.attach_current_thread(|mut env| -> jni::errors::Result<()> {
             let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
-            let activity = unsafe { jni::objects::JObject::from_raw(activity_raw) };
+            let activity = unsafe { jni::objects::JObject::from_raw(&env, activity_raw) };
             let intent = env.new_object(
                 "android/content/Intent", "()V", &[]
             )?;
@@ -1714,18 +1737,11 @@ fn launch_native_player(app: PlatformApp, url: String, title: String, referer: S
     app.run_on_java_main_thread(Box::new(move || {
         let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
         let vm = unsafe { jni::JavaVM::from_raw(vm_ptr) };
-        let vm = match vm {
-            Ok(vm) => vm,
-            Err(error) => {
-                eprintln!("Could not access Android Java VM: {error}");
-                return;
-            }
-        };
 
         let result = vm.attach_current_thread(|mut env| -> jni::errors::Result<()> {
             let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
             // The activity reference is a borrowed JNI global reference owned by android-activity.
-            let activity = unsafe { jni::objects::JObject::from_raw(activity_raw) };
+            let activity = unsafe { jni::objects::JObject::from_raw(&env, activity_raw) };
             let intent = env.new_object("android/content/Intent", "()V", &[])?;
             let class_name = env.new_string("com.brentph505.zenime.PlayerActivity")?;
             let class_name_obj: jni::objects::JObject = class_name.into();

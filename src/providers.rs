@@ -602,7 +602,7 @@ pub fn resolve_episode(client:&Client,packed_id:&str,title:&str,dub:bool)->Resul
             Ok(rows)=>{
                 let candidate=rows.iter().find(|r|r.number==n).or_else(||rows.iter().find(|r|r.number==episode));
                 if let Some(row)=candidate {
-                    if let Ok((p,a,e))=unpack(&row.id,"zn"){
+                    if let Some((p,a,e))=unpack(&row.id,"zn"){
                         let (ep,_)=split_ep(e);
                         let res=match p{
                             "animeparadise"=>resolve_ap(client,a,&ep),
