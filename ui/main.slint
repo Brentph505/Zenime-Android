@@ -170,6 +170,7 @@ export component MainWindow inherits Window {
     callback save-anilist-client-id(string);
     callback playback-settings-changed(bool, bool, bool);
     callback language-selected(bool);
+    callback anilist-action(string);
     callback open-link(string);
 
     VerticalLayout {
@@ -474,6 +475,30 @@ export component MainWindow inherits Window {
                     border-radius: 7px;
                     Text { text: root.dub-enabled ? "Audio: DUB  · tap to switch to SUB" : "Audio: SUB  · tap to switch to DUB"; color: #d7ceff; font-size: 11px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
                     TouchArea { clicked => { root.dub-enabled = !root.dub-enabled; root.language-selected(root.dub-enabled); } }
+                }
+                Text { text: "AniList tracking"; color: #f0f2f5; font-size: 16px; font-weight: 800; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle {
+                        height: 38px; background: #292340; border-radius: 7px; horizontal-stretch: 1;
+                        Text { text: "Watching"; color: #d7ceff; font-size: 10px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.anilist-action("CURRENT"); } }
+                    }
+                    Rectangle {
+                        height: 38px; background: #292340; border-radius: 7px; horizontal-stretch: 1;
+                        Text { text: "Planning"; color: #d7ceff; font-size: 10px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.anilist-action("PLANNING"); } }
+                    }
+                    Rectangle {
+                        height: 38px; background: #292340; border-radius: 7px; horizontal-stretch: 1;
+                        Text { text: "Completed"; color: #d7ceff; font-size: 10px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.anilist-action("COMPLETED"); } }
+                    }
+                }
+                Rectangle {
+                    height: 38px; background: #161b22; border-radius: 7px;
+                    Text { text: "Toggle AniList favourite"; color: #e6edf3; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.anilist-action("FAVOURITE"); } }
                 }
                 Text {
                     text: "Episodes";
