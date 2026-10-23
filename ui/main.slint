@@ -134,6 +134,7 @@ export component MainWindow inherits Window {
     in-out property <[AnimeCardData]> history-cards: [];
     in-out property <string> search-kind: "ANIME";
     in-out property <string> anilist-username: "Not connected";
+    in-out property <string> anilist-client-id: "";
     in-out property <string> active-page: "home";
     in-out property <string> active-category: "trending";
     in-out property <string> status: "Starting Zenime…";
@@ -156,6 +157,7 @@ export component MainWindow inherits Window {
     callback history-action(string);
     callback manga-action(string);
     callback profile-action(string);
+    callback save-anilist-client-id(string);
     callback open-link(string);
 
     VerticalLayout {
@@ -655,6 +657,20 @@ export component MainWindow inherits Window {
                     TouchArea { clicked => { root.save-api-url(root.api-url); } }
                 }
                 Rectangle { height: 1px; background: #30363d; }
+                Text { text: "AniList OAuth client ID"; color: #e6edf3; font-size: 13px; font-weight: 700; }
+                LineEdit {
+                    width: parent.width;
+                    height: 44px;
+                    text <=> root.anilist-client-id;
+                    placeholder-text: "Client ID from your AniList developer settings";
+                }
+                Rectangle {
+                    height: 43px;
+                    background: #292340;
+                    border-radius: 8px;
+                    Text { text: "Save AniList client ID"; color: #d7ceff; font-size: 12px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.save-anilist-client-id(root.anilist-client-id); } }
+                }
                 Text {
                     text: "About Zenime";
                     color: #e6edf3;
