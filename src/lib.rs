@@ -272,8 +272,100 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                 "settings" => {
                     set_status(&weak, "Set a compatible metadata API, then save and refresh.");
                 }
+                "history" => {
+                    let copy = saved.lock().map(|items| items.clone()).unwrap_or_default();
+                    if let Some(window) = weak.upgrade() {
+                        window.set_history_cards(ModelRc::new(VecModel::from(copy.clone())));
+                    }
+                    set_status(&weak, if copy.is_empty() {
+                        "No local history yet. Played titles will appear here."
+                    } else {
+                        "Your recent titles are available to resume."
+                    });
+                }
+                "manga" => {
+                    if let Ok(mut state) = category_state.lock() { *state = "manga".to_string(); }
+                    let query = query_state.lock().map(|s| s.clone()).unwrap_or_default();
+                    load_catalog(weak.clone(), api_base.clone(), "manga".to_string(), query);
+                }
+                "profile" => {
+                    set_status(&weak, "AniList account and list syncing requires OAuth client configuration.");
+                }
+                "about" => {
+                    set_status(&weak, "Zenime native Android · Rust + Slint · minimum Android 8.1 (API 27).");
+                }
                 _ => {}
             }
+        });
+    }
+
+    {
+        let weak = weak.clone();
+        let saved = saved.clone();
+        ui.on_history_action(move |action| {
+            match action.as_str() {
+                "clear" => {
+                    if let Ok(mut items) = saved.lock() { items.clear(); }
+                    if let Some(window) = weak.upgrade() {
+                        window.set_history_cards(ModelRc::new(VecModel::from(Vec::<AnimeCardData>::new())));
+                    }
+                    set_status(&weak, "Local history cleared.");
+                }
+                _ => {
+                    let items = saved.lock().map(|items| items.clone()).unwrap_or_default();
+                    if let Some(window) = weak.upgrade() {
+                        window.set_history_cards(ModelRc::new(VecModel::from(items.clone())));
+                    }
+                    set_status(&weak, if items.is_empty() {
+                        "No viewing history yet. Start an episode to add it here."
+                    } else {
+                        "Recent titles are ready to resume."
+                    });
+                }
+            }
+        });
+    }
+
+    {
+        let weak = weak.clone();
+        let api_base = api_base.clone();
+        let category_state = current_category.clone();
+        let query_state = current_query.clone();
+        ui.on_manga_action(move |query| {
+            let query = query.trim().to_string();
+            if let Ok(mut state) = category_state.lock() { *state = "manga".to_string(); }
+            if let Ok(mut state) = query_state.lock() { *state = query.clone(); }
+            if let Some(window) = weak.upgrade() {
+                window.set_active_page(SharedString::from("manga"));
+            }
+            load_catalog(weak.clone(), api_base.clone(), "manga".to_string(), query);
+        });
+    }
+
+    {
+        let weak = weak.clone();
+        ui.on_profile_action(move |action| {
+            let message = match action.as_str() {
+                "login" => "AniList login needs an OAuth client ID and a registered callback URI. Configure those first; a client secret must never be embedded in the APK.",
+                _ => "No AniList account is connected yet. Once OAuth is configured, profile stats, lists, notifications, and progress sync can be loaded here.",
+            };
+            set_status(&weak, message);
+        });
+    }
+
+    {
+        let weak = weak.clone();
+        let platform_app = platform_app.clone();
+        ui.on_open_link(move |url| {
+            let url = url.to_string();
+            #[cfg(target_os = "android")]
+            if let Some(app) = platform_app.clone() {
+                open_external_url(app, url);
+                return;
+            }
+            #[cfg(not(target_os = "android"))]
+            let _ = url;
+            set_status(&weak, "External links can be opened from the Android app.");
         });
     }
 
@@ -541,6 +633,10 @@ fn load_catalog(
                     "meta/anilist/advanced-search?query={}&type=ANIME&page=1&perPage=24",
                     urlencoding::encode(&query)
                 ),
+                "manga" => format!(
+                    "meta/anilist/advanced-search?query={}&type=MANGA&page=1&perPage=24",
+                    urlencoding::encode(&query)
+                ),
                 _ => "meta/anilist/trending?page=1&perPage=24".to_string(),
             };
             let url = api_url(&base, &route);
@@ -606,6 +702,7 @@ fn category_label(category: &str) -> &'static str {
         "top-airing" => "Top airing",
         "latest" => "Latest episodes",
         "search" => "Search results",
+        "manga" => "Manga search",
         _ => "Trending",
     }
 }
