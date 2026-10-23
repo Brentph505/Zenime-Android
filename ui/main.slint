@@ -143,6 +143,7 @@ export component MainWindow inherits Window {
     in-out property <bool> auto-play: true;
     in-out property <bool> auto-next: false;
     in-out property <bool> skip-intro: false;
+    in-out property <bool> dub-enabled: false;
     in-out property <string> active-page: "home";
     in-out property <string> active-category: "trending";
     in-out property <string> status: "Starting Zenime…";
@@ -168,6 +169,7 @@ export component MainWindow inherits Window {
     callback profile-action(string);
     callback save-anilist-client-id(string);
     callback playback-settings-changed(bool, bool, bool);
+    callback language-selected(bool);
     callback open-link(string);
 
     VerticalLayout {
@@ -465,6 +467,13 @@ export component MainWindow inherits Window {
                         vertical-alignment: center;
                     }
                     TouchArea { clicked => { root.save-selected(); } }
+                }
+                Rectangle {
+                    height: 38px;
+                    background: #292340;
+                    border-radius: 7px;
+                    Text { text: root.dub-enabled ? "Audio: DUB  · tap to switch to SUB" : "Audio: SUB  · tap to switch to DUB"; color: #d7ceff; font-size: 11px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.dub-enabled = !root.dub-enabled; root.language-selected(root.dub-enabled); } }
                 }
                 Text {
                     text: "Episodes";
