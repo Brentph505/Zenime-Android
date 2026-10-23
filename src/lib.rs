@@ -34,6 +34,7 @@ type SharedSelected = Arc<Mutex<SelectedAnime>>;
 type SharedCard = Arc<Mutex<Option<AnimeCardData>>>;
 type SharedSaved = Arc<Mutex<Vec<AnimeCardData>>>;
 type SharedHistory = Arc<Mutex<Vec<AnimeCardData>>>;
+type SharedEpisodeQueue = Arc<Mutex<Vec<EpisodeRowData>>>;
 
 #[derive(Clone, Default)]
 struct SearchFilters {
@@ -96,6 +97,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     let selected_card: SharedCard = Arc::new(Mutex::new(None));
     let saved: SharedSaved = Arc::new(Mutex::new(Vec::new()));
     let history: SharedHistory = Arc::new(Mutex::new(Vec::new()));
+    let episode_queue: SharedEpisodeQueue = Arc::new(Mutex::new(Vec::new()));
     let current_category = Arc::new(Mutex::new("trending".to_string()));
     let current_query = Arc::new(Mutex::new(String::new()));
 
@@ -189,6 +191,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let api_base = api_base.clone();
         let selected = selected.clone();
         let selected_card = selected_card.clone();
+        let episode_queue = episode_queue.clone();
         let category_state = current_category.clone();
         ui.on_anime_selected(move |id, title, image_url, poster| {
             let category = category_state.lock().map(|value| value.clone()).unwrap_or_else(|_| "trending".to_string());
@@ -198,6 +201,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                 api_base.clone(),
                 selected.clone(),
                 selected_card.clone(),
+                episode_queue.clone(),
                 id.to_string(),
                 title.to_string(),
                 media_type.to_string(),
@@ -213,6 +217,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let selected = selected.clone();
         let selected_card = selected_card.clone();
         let history = history.clone();
+        let episode_queue = episode_queue.clone();
         let platform_app = platform_app.clone();
         ui.on_episode_selected(move |episode_id| {
             let chosen = selected.lock().map(|s| s.clone()).unwrap_or_default();
@@ -228,6 +233,13 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             let episode_id = episode_id.to_string();
             let anime_title = chosen.title.clone();
             let media_type = chosen.media_type.clone();
+            let queued = episode_queue.lock().map(|items| items.clone()).unwrap_or_default();
+            let next_episode = queued.iter().position(|episode| episode.id == episode_id)
+                .and_then(|index| queued.get(index + 1).cloned());
+            #[cfg(target_os = "android")]
+            let auto_next = platform_app.as_ref().and_then(|app| read_android_preference(app, "auto_next")).map(|value| value == "true").unwrap_or(false);
+            #[cfg(not(target_os = "android"))]
+            let auto_next = false;
             if let Some(card) = selected_card.lock().ok().and_then(|card| card.clone()) {
                 if let Ok(mut items) = history.lock() {
                     items.retain(|item| item.id != card.id);
@@ -254,9 +266,12 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             std::thread::spawn(move || {
                 match find_direct_stream(&base, &episode_id) {
                     Ok((url, referer)) => {
+                        let next_stream = if auto_next && media_type != "MANGA" {
+                            next_episode.as_ref().and_then(|episode| find_direct_stream(&base, episode.id.as_str()).ok().map(|(next_url, _)| (next_url, episode.title.to_string())))
+                        } else { None };
                         #[cfg(target_os = "android")]
                         if let Some(app) = platform_app {
-                            launch_native_player(app, url, anime_title, referer);
+                            launch_native_player(app, url, anime_title, referer, next_stream);
                             set_status(&weak, "Opened the native video player.");
                             return;
                         }
@@ -1071,6 +1086,7 @@ fn open_anime_detail(
     api_base: SharedApiBase,
     selected: SharedSelected,
     selected_card: SharedCard,
+    episode_queue: SharedEpisodeQueue,
     id: String,
     title: String,
     media_type: String,
@@ -1148,6 +1164,7 @@ fn open_anime_detail(
                 match detail {
                     Ok((description, meta, episodes)) => {
                         let count = episodes.len();
+                        if let Ok(mut queue) = episode_queue.lock() { *queue = episodes.clone(); }
                         window.set_selected_description(SharedString::from(description));
                         window.set_selected_meta(SharedString::from(if meta.is_empty() {
                             if media_type == "MANGA" { "Manga".to_string() } else { "Anime".to_string() }
@@ -1389,7 +1406,7 @@ fn open_external_url(app: PlatformApp, url: String) {
 }
 
 #[cfg(target_os = "android")]
-fn launch_native_player(app: PlatformApp, url: String, title: String, referer: String) {
+fn launch_native_player(app: PlatformApp, url: String, title: String, referer: String, next_stream: Option<(String, String)>) {
     app.run_on_java_main_thread(Box::new(move || {
         let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
         let vm = unsafe { jni::JavaVM::from_raw(vm_ptr) };
@@ -1419,10 +1436,14 @@ fn launch_native_player(app: PlatformApp, url: String, title: String, referer: S
                 ],
             )?;
 
+            let next_url = next_stream.as_ref().map(|item| item.0.as_str()).unwrap_or("");
+            let next_title = next_stream.as_ref().map(|item| item.1.as_str()).unwrap_or("");
             for (key, value) in [
                 ("media_url", url.as_str()),
                 ("media_title", title.as_str()),
                 ("media_referer", referer.as_str()),
+                ("next_media_url", next_url),
+                ("next_media_title", next_title),
             ] {
                 let key_string = env.new_string(key)?;
                 let value_string = env.new_string(value)?;
