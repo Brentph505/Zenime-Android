@@ -149,6 +149,29 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     {
         let weak = weak.clone();
         let api_base = api_base.clone();
+        let category_state = current_category.clone();
+        let query_state = current_query.clone();
+        ui.on_search_filter_requested(move |query, year, season, format, status, sort| {
+            let query = query.trim().to_string();
+            if let Ok(mut state) = category_state.lock() { *state = "search".to_string(); }
+            if let Ok(mut state) = query_state.lock() { *state = query.clone(); }
+            let filters = SearchFilters {
+                year: year.trim().to_string(),
+                season: season.trim().to_ascii_uppercase(),
+                format: format.trim().to_ascii_uppercase(),
+                status: status.trim().to_ascii_uppercase(),
+                sort: sort.trim().to_ascii_uppercase(),
+            };
+            if let Some(window) = weak.upgrade() {
+                window.set_active_page(SharedString::from("search"));
+            }
+            load_catalog_with_filters(weak.clone(), api_base.clone(), "search".to_string(), query, filters);
+        });
+    }
+
+    {
+        let weak = weak.clone();
+        let api_base = api_base.clone();
         let selected = selected.clone();
         let selected_card = selected_card.clone();
         let category_state = current_category.clone();
