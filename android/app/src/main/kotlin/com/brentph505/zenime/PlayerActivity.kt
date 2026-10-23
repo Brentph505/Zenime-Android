@@ -33,6 +33,10 @@ class PlayerActivity : Activity() {
         val mediaUrl = intent.getStringExtra("media_url")
         val mediaTitle = intent.getStringExtra("media_title") ?: "Now playing"
         val referer = intent.getStringExtra("media_referer").orEmpty()
+        val nextMediaUrl = intent.getStringExtra("next_media_url").orEmpty()
+        val prefs = getSharedPreferences("zenime_native", MODE_PRIVATE)
+        val autoPlay = prefs.getString("auto_play", "true") != "false"
+        val showSkipIntro = prefs.getString("skip_intro", "false") == "true"
 
         if (mediaUrl.isNullOrBlank() || !(mediaUrl.startsWith("https://") || mediaUrl.startsWith("http://"))) {
             Toast.makeText(this, "This episode has no playable direct stream.", Toast.LENGTH_LONG).show()
@@ -92,6 +96,30 @@ class PlayerActivity : Activity() {
             )
         )
 
+        if (showSkipIntro) {
+            val skipButton = TextView(this).apply {
+                text = "Skip intro  ›"
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setPadding(dp(14), 0, dp(14), 0)
+                setBackgroundColor(0xCC51418C.toInt())
+                setOnClickListener {
+                    val duration = this@PlayerActivity.player?.duration ?: 0L
+                    val target = (this@PlayerActivity.player?.currentPosition ?: 0L) + 85_000L
+                    this@PlayerActivity.player?.seekTo(if (duration > 0L) minOf(target, duration) else target)
+                }
+            }
+            root.addView(
+                skipButton,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    dp(42),
+                    Gravity.BOTTOM or Gravity.END
+                ).apply { setMargins(0, 0, dp(16), dp(72)) }
+            )
+        }
+
         setContentView(root)
 
         val itemBuilder = MediaItem.Builder().setUri(Uri.parse(mediaUrl))
@@ -103,8 +131,12 @@ class PlayerActivity : Activity() {
         }
 
         player?.apply {
-            setMediaItem(itemBuilder.build())
-            playWhenReady = true
+            val items = mutableListOf(itemBuilder.build())
+            if (nextMediaUrl.startsWith("https://") || nextMediaUrl.startsWith("http://")) {
+                items.add(MediaItem.fromUri(nextMediaUrl))
+            }
+            setMediaItems(items)
+            playWhenReady = autoPlay
             prepare()
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
