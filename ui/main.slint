@@ -629,6 +629,26 @@ export component MainWindow inherits Window {
                 }
                 Rectangle {
                     height: 42px; background: #161b22; border-radius: 8px;
+                    Text { text: "Load my anime list"; color: #e6edf3; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.profile-action("list-anime"); } }
+                }
+                Rectangle {
+                    height: 42px; background: #161b22; border-radius: 8px;
+                    Text { text: "Load my manga list"; color: #e6edf3; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.profile-action("list-manga"); } }
+                }
+                Rectangle {
+                    height: 42px; background: #161b22; border-radius: 8px;
+                    Text { text: "Check notifications"; color: #e6edf3; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.profile-action("notifications"); } }
+                }
+                Rectangle {
+                    height: 42px; background: #3b2027; border-radius: 8px;
+                    Text { text: "Disconnect AniList"; color: #ffb4bd; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.profile-action("logout"); } }
+                }
+                Rectangle {
+                    height: 42px; background: #161b22; border-radius: 8px;
                     Text { text: "Open AniList website"; color: #e6edf3; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
                     TouchArea { clicked => { root.open-link("https://anilist.co/"); } }
                 }
