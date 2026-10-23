@@ -547,6 +547,41 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
 
     {
         let weak = weak.clone();
+        let selected = selected.clone();
+        let platform_app = platform_app.clone();
+        ui.on_anilist_action(move |action| {
+            #[cfg(target_os = "android")]
+            let token = platform_app.as_ref().and_then(|app| read_android_preference(app, "anilist_access_token"));
+            #[cfg(not(target_os = "android"))]
+            let token: Option<String> = None;
+            let Some(token) = token else {
+                set_status(&weak, "Connect AniList from Profile before editing lists.");
+                return;
+            };
+            let chosen = selected.lock().map(|value| value.clone()).unwrap_or_default();
+            let Ok(media_id) = chosen.id.parse::<i64>() else {
+                set_status(&weak, "This title does not have a valid AniList media ID.");
+                return;
+            };
+            let action = action.to_string();
+            set_status(&weak, "Updating your AniList list…");
+            let weak_for_action = weak.clone();
+            std::thread::spawn(move || {
+                let result = update_anilist_entry(&token, media_id, &action);
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(window) = weak_for_action.upgrade() {
+                        window.set_status(SharedString::from(match result {
+                            Ok(()) => "AniList updated successfully.".to_string(),
+                            Err(message) => message,
+                        }));
+                    }
+                });
+            });
+        });
+    }
+
+    {
+        let weak = weak.clone();
         let platform_app = platform_app.clone();
         ui.on_language_selected(move |dub_enabled| {
             #[cfg(target_os = "android")]
@@ -628,6 +663,38 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     );
 
     ui.run()
+}
+
+fn update_anilist_entry(token: &str, media_id: i64, action: &str) -> Result<(), String> {
+    let client = request_client()?;
+    let (query, variables) = if action == "FAVOURITE" {
+        (
+            "mutation ($animeId: Int) { ToggleFavourite(animeId: $animeId) { anime { nodes { id } } } }",
+            serde_json::json!({"animeId": media_id}),
+        )
+    } else {
+        let status = match action {
+            "CURRENT" => "CURRENT",
+            "PLANNING" => "PLANNING",
+            "COMPLETED" => "COMPLETED",
+            _ => return Err("Unsupported AniList list action.".to_string()),
+        };
+        (
+            "mutation ($mediaId: Int, $status: MediaListStatus) { SaveMediaListEntry(mediaId: $mediaId, status: $status) { id status progress } }",
+            serde_json::json!({"mediaId": media_id, "status": status}),
+        )
+    };
+    let response = client.post("https://graphql.anilist.co")
+        .bearer_auth(token)
+        .json(&serde_json::json!({"query": query, "variables": variables}))
+        .send().map_err(|error| format!("AniList update request failed: {error}"))?
+        .error_for_status().map_err(|error| format!("AniList rejected the update: {error}"))?
+        .json::<Value>().map_err(|error| format!("AniList returned invalid update data: {error}"))?;
+    if let Some(errors) = response.get("errors").and_then(Value::as_array) {
+        let message = errors.first().and_then(|item| item.get("message")).and_then(Value::as_str).unwrap_or("AniList update failed.");
+        return Err(message.to_string());
+    }
+    Ok(())
 }
 
 fn fetch_anilist_section(token: &str, action: &str) -> Result<(String, String), String> {
