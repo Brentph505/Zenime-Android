@@ -54,8 +54,15 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     let ui = MainWindow::new()?;
     let weak = ui.as_weak();
 
+    #[cfg(target_os = "android")]
+    let saved_api = platform_app.as_ref().and_then(read_android_preference);
+    #[cfg(not(target_os = "android"))]
+    let saved_api: Option<String> = None;
+
     let initial_api = std::env::var("ZENIME_API_BASE_URL")
-        .unwrap_or_else(|_| DEFAULT_API_BASE.to_string());
+        .ok()
+        .or(saved_api)
+        .unwrap_or_else(|| DEFAULT_API_BASE.to_string());
     let api_base: SharedApiBase = Arc::new(Mutex::new(normalize_base(&initial_api)));
     let selected: SharedSelected = Arc::new(Mutex::new(SelectedAnime::default()));
     let selected_card: SharedCard = Arc::new(Mutex::new(None));
@@ -210,6 +217,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let api_base = api_base.clone();
         let category_state = current_category.clone();
         let query_state = current_query.clone();
+        let platform_app = platform_app.clone();
         ui.on_save_api_url(move |input| {
             let base = normalize_base(input.as_str());
             if !base.starts_with("https://") && !base.starts_with("http://") {
@@ -218,6 +226,10 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             }
             if let Ok(mut state) = api_base.lock() {
                 *state = base.clone();
+            }
+            #[cfg(target_os = "android")]
+            if let Some(app) = platform_app.as_ref() {
+                write_android_preference(app, "api_base", &base);
             }
             if let Some(window) = weak.upgrade() {
                 window.set_api_url(SharedString::from(base));
@@ -916,6 +928,103 @@ fn provider_referer(provider: &str) -> &'static str {
         "kickassanime" => "https://krussdomi.com/",
         _ => "https://anikoto.to/",
     }
+}
+
+#[cfg(target_os = "android")]
+fn read_android_preference(app: &PlatformApp) -> Option<String> {
+    let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
+    let vm = unsafe { jni::JavaVM::from_raw(vm_ptr) }.ok()?;
+    vm.attach_current_thread(|mut env| -> jni::errors::Result<Option<String>> {
+        let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
+        let activity = unsafe { jni::objects::JObject::from_raw(activity_raw) };
+        let name = env.new_string("zenime_native")?;
+        let name_obj: jni::objects::JObject = name.into();
+        let prefs = env.call_method(
+            &activity, "getSharedPreferences",
+            "(Ljava/lang/String;I)Landroid/content/SharedPreferences;",
+            &[jni::objects::JValue::Object(&name_obj), jni::objects::JValue::Int(0)],
+        )?.l()?;
+        let key = env.new_string("api_base")?;
+        let key_obj: jni::objects::JObject = key.into();
+        let default = env.new_string("")?;
+        let default_obj: jni::objects::JObject = default.into();
+        let value = env.call_method(
+            &prefs, "getString",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[jni::objects::JValue::Object(&key_obj), jni::objects::JValue::Object(&default_obj)],
+        )?.l()?;
+        if value.is_null() { return Ok(None); }
+        let value: jni::objects::JString = value.into();
+        let text: String = env.get_string(&value)?.into();
+        Ok(if text.trim().is_empty() { None } else { Some(text) })
+    }).ok().flatten()
+}
+
+#[cfg(target_os = "android")]
+fn write_android_preference(app: &PlatformApp, key: &str, value: &str) {
+    let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
+    let Ok(vm) = (unsafe { jni::JavaVM::from_raw(vm_ptr) }) else { return; };
+    let _ = vm.attach_current_thread(|mut env| -> jni::errors::Result<()> {
+        let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
+        let activity = unsafe { jni::objects::JObject::from_raw(activity_raw) };
+        let name = env.new_string("zenime_native")?;
+        let name_obj: jni::objects::JObject = name.into();
+        let prefs = env.call_method(
+            &activity, "getSharedPreferences",
+            "(Ljava/lang/String;I)Landroid/content/SharedPreferences;",
+            &[jni::objects::JValue::Object(&name_obj), jni::objects::JValue::Int(0)],
+        )?.l()?;
+        let editor = env.call_method(&prefs, "edit", "()Landroid/content/SharedPreferences$Editor;", &[])?.l()?;
+        let jkey = env.new_string(key)?;
+        let jvalue = env.new_string(value)?;
+        let key_obj: jni::objects::JObject = jkey.into();
+        let value_obj: jni::objects::JObject = jvalue.into();
+        env.call_method(
+            &editor, "putString",
+            "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/SharedPreferences$Editor;",
+            &[jni::objects::JValue::Object(&key_obj), jni::objects::JValue::Object(&value_obj)],
+        )?;
+        env.call_method(&editor, "apply", "()V", &[])?;
+        Ok(())
+    });
+}
+
+#[cfg(target_os = "android")]
+fn open_external_url(app: PlatformApp, url: String) {
+    app.run_on_java_main_thread(Box::new(move || {
+        let vm_ptr = app.vm_as_ptr() as *mut jni::sys::JavaVM;
+        let Ok(vm) = (unsafe { jni::JavaVM::from_raw(vm_ptr) }) else { return; };
+        let _ = vm.attach_current_thread(|mut env| -> jni::errors::Result<()> {
+            let activity_raw = app.activity_as_ptr() as jni::sys::jobject;
+            let activity = unsafe { jni::objects::JObject::from_raw(activity_raw) };
+            let intent = env.new_object(
+                "android/content/Intent", "()V", &[]
+            )?;
+            let action = env.new_string("android.intent.action.VIEW")?;
+            let action_obj: jni::objects::JObject = action.into();
+            env.call_method(
+                &intent, "setAction",
+                "(Ljava/lang/String;)Landroid/content/Intent;",
+                &[jni::objects::JValue::Object(&action_obj)],
+            )?;
+            let uri_class = env.find_class("android/net/Uri")?;
+            let url_string = env.new_string(&url)?;
+            let url_obj: jni::objects::JObject = url_string.into();
+            let uri = env.call_static_method(
+                uri_class, "parse", "(Ljava/lang/String;)Landroid/net/Uri;",
+                &[jni::objects::JValue::Object(&url_obj)],
+            )?.l()?;
+            env.call_method(
+                &intent, "setData", "(Landroid/net/Uri;)Landroid/content/Intent;",
+                &[jni::objects::JValue::Object(&uri)],
+            )?;
+            env.call_method(
+                &activity, "startActivity", "(Landroid/content/Intent;)V",
+                &[jni::objects::JValue::Object(&intent)],
+            )?;
+            Ok(())
+        });
+    }));
 }
 
 #[cfg(target_os = "android")]
