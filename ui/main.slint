@@ -124,6 +124,9 @@ export component MainWindow inherits Window {
     in-out property <[AnimeCardData]> anime-cards: [];
     in-out property <[EpisodeRowData]> episodes: [];
     in-out property <[AnimeCardData]> saved-cards: [];
+    in-out property <[AnimeCardData]> history-cards: [];
+    in-out property <string> search-kind: "ANIME";
+    in-out property <string> anilist-username: "Not connected";
     in-out property <string> active-page: "home";
     in-out property <string> active-category: "trending";
     in-out property <string> status: "Starting Zenime…";
@@ -143,6 +146,10 @@ export component MainWindow inherits Window {
     callback save-selected();
     callback save-api-url(string);
     callback refresh-requested();
+    callback history-action(string);
+    callback manga-action(string);
+    callback profile-action(string);
+    callback open-link(string);
 
     VerticalLayout {
         spacing: 0px;
@@ -468,6 +475,115 @@ export component MainWindow inherits Window {
             }
         }
 
+        if root.active-page == "history" : ScrollView {
+            VerticalLayout {
+                padding: 14px;
+                spacing: 13px;
+                Text { text: "Watch history"; color: #f0f2f5; font-size: 23px; font-weight: 800; }
+                Text { text: "Resume recent episodes and manage your local viewing history."; color: #9da7b3; font-size: 11px; wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        height: 38px; background: #292340; border-radius: 7px; horizontal-stretch: 1;
+                        Text { text: "Refresh"; color: #d7ceff; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.history-action("refresh"); } }
+                    }
+                    Rectangle {
+                        height: 38px; background: #3b2027; border-radius: 7px; horizontal-stretch: 1;
+                        Text { text: "Clear history"; color: #ffb4bd; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.history-action("clear"); } }
+                    }
+                }
+                Text { text: root.status; color: #9da7b3; font-size: 11px; wrap: word-wrap; }
+                GridLayout {
+                    spacing: 11px;
+                    for anime[index] in root.history-cards: AnimeTile {
+                        col: index.mod(2); row: index / 2; anime: anime;
+                        chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
+                    }
+                }
+            }
+        }
+
+        if root.active-page == "manga" : ScrollView {
+            VerticalLayout {
+                padding: 14px;
+                spacing: 13px;
+                Text { text: "Manga"; color: #f0f2f5; font-size: 23px; font-weight: 800; }
+                Text { text: "Browse manga using the catalog metadata backend. Chapter-reader support depends on the configured provider."; color: #9da7b3; font-size: 11px; wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        horizontal-stretch: 1; height: 42px;
+                        text <=> root.search-query;
+                        placeholder-text: "Search manga…";
+                        accepted => { root.manga-action(root.search-query); }
+                    }
+                    Rectangle {
+                        width: 48px; height: 42px; background: #8b79d9; border-radius: 7px;
+                        Text { text: "⌕"; color: #ffffff; font-size: 23px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.manga-action(root.search-query); } }
+                    }
+                }
+                Text { text: root.status; color: #9da7b3; font-size: 11px; wrap: word-wrap; }
+                GridLayout {
+                    spacing: 11px;
+                    for anime[index] in root.anime-cards: AnimeTile {
+                        col: index.mod(2); row: index / 2; anime: anime;
+                        chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
+                    }
+                }
+            }
+        }
+
+        if root.active-page == "profile" : ScrollView {
+            VerticalLayout {
+                padding: 16px;
+                spacing: 13px;
+                Rectangle {
+                    height: 105px; background: #171626; border-radius: 12px;
+                    VerticalLayout {
+                        padding: 14px; spacing: 7px;
+                        Text { text: "Your Zenime profile"; color: #ffffff; font-size: 20px; font-weight: 800; }
+                        Text { text: root.anilist-username; color: #b7a7ff; font-size: 12px; }
+                        Text { text: "Connect AniList to sync lists, scores, progress, and favourites."; color: #c6c0df; font-size: 11px; wrap: word-wrap; }
+                    }
+                }
+                Rectangle {
+                    height: 43px; background: #8b79d9; border-radius: 8px;
+                    Text { text: "Connect AniList"; color: #ffffff; font-size: 12px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.profile-action("login"); } }
+                }
+                Rectangle {
+                    height: 42px; background: #161b22; border-radius: 8px;
+                    Text { text: "Refresh account and list stats"; color: #e6edf3; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.profile-action("refresh"); } }
+                }
+                Rectangle {
+                    height: 42px; background: #161b22; border-radius: 8px;
+                    Text { text: "Open AniList website"; color: #e6edf3; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.open-link("https://anilist.co/"); } }
+                }
+                Text { text: "Account support requires a registered AniList OAuth client ID and a secure callback configuration. Never put a client secret inside the APK."; color: #8b949e; font-size: 10px; wrap: word-wrap; }
+                Text { text: root.status; color: #9da7b3; font-size: 11px; wrap: word-wrap; }
+            }
+        }
+
+        if root.active-page == "about" : ScrollView {
+            VerticalLayout {
+                padding: 16px; spacing: 13px;
+                Text { text: "About Zenime"; color: #f0f2f5; font-size: 23px; font-weight: 800; }
+                Text { text: "Zenime is an anime discovery and media-tracking project derived from Miruro. This native edition uses Rust for app logic and Slint for its compiled interface."; color: #aeb8c4; font-size: 12px; wrap: word-wrap; }
+                Text { text: "Native app features"; color: #e6edf3; font-size: 16px; font-weight: 800; }
+                Text { text: "Discovery and search • metadata and episodes • native video playback • saved library • viewing history • manga catalog and reading integration • AniList account integration • profile and statistics • settings and preferences."; color: #9da7b3; font-size: 12px; wrap: word-wrap; }
+                Rectangle { height: 42px; background: #161b22; border-radius: 8px;
+                    Text { text: "Open Zenime website"; color: #e6edf3; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea { clicked => { root.open-link("https://github.com/Brentph505/Zenime"); } }
+                }
+                Text { text: "Keep the upstream attribution and non-commercial license when redistributing this derivative."; color: #8b949e; font-size: 10px; wrap: word-wrap; }
+            }
+        }
+
         if root.active-page == "settings" : ScrollView {
             VerticalLayout {
                 padding: 16px;
@@ -562,6 +678,9 @@ export component MainWindow inherits Window {
                 NavItem { label: "HOME"; glyph: "⌂"; chosen => { root.navigate("home"); } }
                 NavItem { label: "SEARCH"; glyph: "⌕"; chosen => { root.navigate("search"); } }
                 NavItem { label: "SAVED"; glyph: "♡"; chosen => { root.navigate("saved"); } }
+                NavItem { label: "HISTORY"; glyph: "◷"; chosen => { root.navigate("history"); } }
+                NavItem { label: "MANGA"; glyph: "▤"; chosen => { root.navigate("manga"); } }
+                NavItem { label: "PROFILE"; glyph: "●"; chosen => { root.navigate("profile"); } }
                 NavItem { label: "SETTINGS"; glyph: "⚙"; chosen => { root.navigate("settings"); } }
             }
         }
