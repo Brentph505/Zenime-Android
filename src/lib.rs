@@ -73,6 +73,12 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     let current_category = Arc::new(Mutex::new("trending".to_string()));
     let current_query = Arc::new(Mutex::new(String::new()));
 
+    #[cfg(target_os = "android")]
+    if let Some(app) = platform_app.as_ref() {
+        restore_cards(weak.clone(), app, "saved_items", saved.clone(), false);
+        restore_cards(weak.clone(), app, "history_items", history.clone(), true);
+    }
+
     ui.set_api_url(SharedString::from(initial_api));
     ui.set_status(SharedString::from("Loading trending anime…"));
 
@@ -152,6 +158,8 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let weak = weak.clone();
         let api_base = api_base.clone();
         let selected = selected.clone();
+        let selected_card = selected_card.clone();
+        let history = history.clone();
         let platform_app = platform_app.clone();
         ui.on_episode_selected(move |episode_id| {
             let chosen = selected.lock().map(|s| s.clone()).unwrap_or_default();
@@ -167,6 +175,24 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
             let episode_id = episode_id.to_string();
             let anime_title = chosen.title.clone();
             let media_type = chosen.media_type.clone();
+            if let Some(card) = selected_card.lock().ok().and_then(|card| card.clone()) {
+                if let Ok(mut items) = history.lock() {
+                    items.retain(|item| item.id != card.id);
+                    items.insert(0, card);
+                    items.truncate(50);
+                    #[cfg(target_os = "android")]
+                    if let Some(app) = platform_app.as_ref() {
+                        write_android_preference(app, "history_items", &serialize_cards(&items));
+                    }
+                    let copy = items.clone();
+                    let weak_for_ui = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(window) = weak_for_ui.upgrade() {
+                            window.set_history_cards(ModelRc::new(VecModel::from(copy)));
+                        }
+                    });
+                }
+            }
             if media_type == "MANGA" {
                 load_manga_pages(weak.clone(), base, episode_id, anime_title);
                 return;
@@ -200,6 +226,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         let weak = weak.clone();
         let selected_card = selected_card.clone();
         let saved = saved.clone();
+        let platform_app = platform_app.clone();
         ui.on_save_selected(move || {
             let current = selected_card.lock().ok().and_then(|value| value.clone());
             let Some(card) = current else {
@@ -217,6 +244,10 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
                 }
 
                 let copy = items.clone();
+                #[cfg(target_os = "android")]
+                if let Some(app) = platform_app.as_ref() {
+                    write_android_preference(app, "saved_items", &serialize_cards(&items));
+                }
                 if let Some(window) = weak.upgrade() {
                     window.set_saved_cards(ModelRc::new(VecModel::from(copy)));
                 }
@@ -417,6 +448,65 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     );
 
     ui.run()
+}
+
+fn serialize_cards(cards: &[AnimeCardData]) -> String {
+    let records = cards.iter().map(|card| serde_json::json!({
+        "id": card.id.to_string(),
+        "title": card.title.to_string(),
+        "details": card.details.to_string(),
+        "image_url": card.image_url.to_string(),
+    })).collect::<Vec<_>>();
+    serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string())
+}
+
+#[cfg(target_os = "android")]
+fn restore_cards(
+    weak: slint::Weak<MainWindow>,
+    app: &PlatformApp,
+    key: &'static str,
+    target: SharedSaved,
+    is_history: bool,
+) {
+    let Some(raw) = read_android_preference(app, key) else { return; };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else { return; };
+    let Some(items) = value.as_array() else { return; };
+    let records = items.iter().filter_map(|item| {
+        let id = first_text(item, &["id"]);
+        let title = first_text(item, &["title"]);
+        if id.is_empty() || title.is_empty() { return None; }
+        Some(AnimeRecord {
+            id,
+            title,
+            details: first_text(item, &["details"]),
+            image_url: first_text(item, &["image_url"]),
+        })
+    }).collect::<Vec<_>>();
+    if records.is_empty() { return; }
+    std::thread::spawn(move || {
+        let Ok(client) = request_client() else { return; };
+        let mut cards = Vec::new();
+        for record in records {
+            let pixels = load_poster(&client, &record.image_url);
+            cards.push(AnimeCardData {
+                id: SharedString::from(record.id),
+                title: SharedString::from(record.title),
+                details: SharedString::from(record.details),
+                image_url: SharedString::from(record.image_url),
+                poster: Image::from_rgba8(pixels),
+            });
+        }
+        if let Ok(mut current) = target.lock() { *current = cards.clone(); }
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                if is_history {
+                    window.set_history_cards(ModelRc::new(VecModel::from(cards)));
+                } else {
+                    window.set_saved_cards(ModelRc::new(VecModel::from(cards)));
+                }
+            }
+        });
+    });
 }
 
 fn api_base_for_selected(base: &SharedApiBase) -> String {
