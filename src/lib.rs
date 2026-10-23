@@ -66,6 +66,11 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
         .or(saved_api)
         .unwrap_or_else(|| DEFAULT_API_BASE.to_string());
     let api_base: SharedApiBase = Arc::new(Mutex::new(normalize_base(&initial_api)));
+    #[cfg(target_os = "android")]
+    let initial_client_id = platform_app.as_ref().and_then(|app| read_android_preference(app, "anilist_client_id")).unwrap_or_default();
+    #[cfg(not(target_os = "android"))]
+    let initial_client_id = String::new();
+    let client_id = Arc::new(Mutex::new(initial_client_id.clone()));
     let selected: SharedSelected = Arc::new(Mutex::new(SelectedAnime::default()));
     let selected_card: SharedCard = Arc::new(Mutex::new(None));
     let saved: SharedSaved = Arc::new(Mutex::new(Vec::new()));
@@ -80,6 +85,7 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     }
 
     ui.set_api_url(SharedString::from(initial_api));
+    ui.set_anilist_client_id(SharedString::from(initial_client_id));
     ui.set_status(SharedString::from("Loading trending anime…"));
 
     {
@@ -403,12 +409,75 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
 
     {
         let weak = weak.clone();
+        let client_id = client_id.clone();
+        let platform_app = platform_app.clone();
         ui.on_profile_action(move |action| {
-            let message = match action.as_str() {
-                "login" => "AniList login needs an OAuth client ID and a registered callback URI. Configure those first; a client secret must never be embedded in the APK.",
-                _ => "No AniList account is connected yet. Once OAuth is configured, profile stats, lists, notifications, and progress sync can be loaded here.",
+            if action.as_str() == "login" {
+                let id = client_id.lock().map(|value| value.clone()).unwrap_or_default();
+                if id.trim().is_empty() {
+                    set_status(&weak, "Add your AniList OAuth client ID in Settings first.");
+                    return;
+                }
+                let url = format!(
+                    "https://anilist.co/api/v2/oauth/authorize?client_id={}&redirect_uri=zenime%3A%2F%2Fcallback&response_type=token",
+                    urlencoding::encode(id.trim())
+                );
+                #[cfg(target_os = "android")]
+                if let Some(app) = platform_app.clone() {
+                    open_external_url(app, url);
+                    set_status(&weak, "Complete AniList authorization in your browser, then return to Zenime.");
+                    return;
+                }
+                #[cfg(not(target_os = "android"))]
+                let _ = url;
+                set_status(&weak, "AniList authorization is available in the Android app.");
+                return;
+            }
+
+            #[cfg(target_os = "android")]
+            let token = platform_app.as_ref().and_then(|app| read_android_preference(app, "anilist_access_token"));
+            #[cfg(not(target_os = "android"))]
+            let token: Option<String> = None;
+
+            let Some(token) = token else {
+                set_status(&weak, "Connect AniList first to load your profile, lists, and statistics.");
+                return;
             };
-            set_status(&weak, message);
+            set_status(&weak, "Loading your AniList profile and statistics…");
+            let weak_for_profile = weak.clone();
+            std::thread::spawn(move || {
+                let result = fetch_anilist_profile(&token);
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(window) = weak_for_profile.upgrade() {
+                        match result {
+                            Ok((name, stats)) => {
+                                window.set_anilist_username(SharedString::from(name));
+                                window.set_status(SharedString::from(stats));
+                            }
+                            Err(message) => window.set_status(SharedString::from(message)),
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    {
+        let weak = weak.clone();
+        let client_id = client_id.clone();
+        let platform_app = platform_app.clone();
+        ui.on_save_anilist_client_id(move |value| {
+            let value = value.trim().to_string();
+            if value.is_empty() {
+                set_status(&weak, "Enter a valid AniList OAuth client ID.");
+                return;
+            }
+            if let Ok(mut current) = client_id.lock() { *current = value.clone(); }
+            #[cfg(target_os = "android")]
+            if let Some(app) = platform_app.as_ref() {
+                write_android_preference(app, "anilist_client_id", &value);
+            }
+            set_status(&weak, "AniList client ID saved. Register zenime://callback as the OAuth redirect URI.");
         });
     }
 
@@ -448,6 +517,38 @@ fn run_window(platform_app: Option<PlatformApp>) -> Result<(), slint::PlatformEr
     );
 
     ui.run()
+}
+
+fn fetch_anilist_profile(token: &str) -> Result<(String, String), String> {
+    let client = request_client()?;
+    let query = "query { Viewer { name statistics { anime { count episodesWatched minutesWatched } manga { count chaptersRead volumesRead } } } }";
+    let response = client.post("https://graphql.anilist.co")
+        .bearer_auth(token)
+        .json(&serde_json::json!({"query": query}))
+        .send()
+        .map_err(|error| format!("AniList request failed: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("AniList authorization or API error: {error}"))?
+        .json::<Value>()
+        .map_err(|error| format!("AniList returned invalid profile data: {error}"))?;
+    if let Some(errors) = response.get("errors").and_then(Value::as_array) {
+        let message = errors.first().and_then(|item| item.get("message")).and_then(Value::as_str).unwrap_or("AniList profile request failed.");
+        return Err(message.to_string());
+    }
+    let viewer = response.get("data").and_then(|data| data.get("Viewer")).ok_or_else(|| "AniList did not return a signed-in user.".to_string())?;
+    let name = first_text(viewer, &["name"]);
+    let stats = viewer.get("statistics").unwrap_or(&Value::Null);
+    let anime = stats.get("anime").unwrap_or(&Value::Null);
+    let manga = stats.get("manga").unwrap_or(&Value::Null);
+    let summary = format!(
+        "Anime: {} titles · {} episodes watched · {} minutes. Manga: {} titles · {} chapters read.",
+        first_text(anime, &["count"]),
+        first_text(anime, &["episodesWatched"]),
+        first_text(anime, &["minutesWatched"]),
+        first_text(manga, &["count"]),
+        first_text(manga, &["chaptersRead"]),
+    );
+    Ok((if name.is_empty() { "AniList user".to_string() } else { name }, summary))
 }
 
 fn serialize_cards(cards: &[AnimeCardData]) -> String {
