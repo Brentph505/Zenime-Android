@@ -133,6 +133,11 @@ export component MainWindow inherits Window {
     in-out property <[AnimeCardData]> saved-cards: [];
     in-out property <[AnimeCardData]> history-cards: [];
     in-out property <string> search-kind: "ANIME";
+    in-out property <string> search-year: "";
+    in-out property <string> search-season: "";
+    in-out property <string> search-format: "";
+    in-out property <string> search-status: "";
+    in-out property <string> search-sort: "POPULARITY_DESC";
     in-out property <string> anilist-username: "Not connected";
     in-out property <string> anilist-client-id: "";
     in-out property <string> active-page: "home";
@@ -148,6 +153,7 @@ export component MainWindow inherits Window {
 
     callback category-selected(string);
     callback search-requested(string);
+    callback search-filter-requested(string, string, string, string, string, string);
     callback anime-selected(string, string, string, image);
     callback episode-selected(string);
     callback navigate(string);
@@ -360,6 +366,25 @@ export component MainWindow inherits Window {
                         TouchArea {
                             clicked => { root.search-requested(root.search-query); }
                         }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit { horizontal-stretch: 1; height: 38px; text <=> root.search-year; placeholder-text: "Year"; }
+                    LineEdit { horizontal-stretch: 1; height: 38px; text <=> root.search-season; placeholder-text: "Season"; }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit { horizontal-stretch: 1; height: 38px; text <=> root.search-format; placeholder-text: "Format"; }
+                    LineEdit { horizontal-stretch: 1; height: 38px; text <=> root.search-status; placeholder-text: "Status"; }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit { horizontal-stretch: 1; height: 38px; text <=> root.search-sort; placeholder-text: "Sort (POPULARITY_DESC)"; }
+                    Rectangle {
+                        width: 86px; height: 38px; background: #403568; border-radius: 7px;
+                        Text { text: "Apply"; color: #ffffff; font-size: 12px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.search-filter-requested(root.search-query, root.search-year, root.search-season, root.search-format, root.search-status, root.search-sort); } }
                     }
                 }
                 Text {
