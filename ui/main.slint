@@ -372,7 +372,7 @@ export component MainWindow inherits Window {
                         col: index.mod(2);
                         row: index / 2;
                         anime: anime;
-                        chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
+                        chosen(id, title, image-url, poster) => { root.anime-selected(id, title, image-url, poster); }
                     }
                 }
             }
@@ -476,7 +476,7 @@ export component MainWindow inherits Window {
                         col: index.mod(2);
                         row: index / 2;
                         anime: anime;
-                        chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
+                        chosen(id, title, image-url, poster) => { root.anime-selected(id, title, image-url, poster); }
                     }
                 }
             }
@@ -527,7 +527,7 @@ export component MainWindow inherits Window {
                     spacing: 11px;
                     for anime[index] in root.history-cards: AnimeTile {
                         col: index.mod(2); row: index / 2; anime: anime;
-                        chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
+                        chosen(id, title, image-url, poster) => { root.anime-selected(id, title, image-url, poster); }
                     }
                 }
             }
@@ -558,7 +558,7 @@ export component MainWindow inherits Window {
                     spacing: 11px;
                     for anime[index] in root.anime-cards: AnimeTile {
                         col: index.mod(2); row: index / 2; anime: anime;
-                        chosen(id, title, poster) => { root.anime-selected(id, title, poster); }
+                        chosen(id, title, image-url, poster) => { root.anime-selected(id, title, image-url, poster); }
                     }
                 }
             }
